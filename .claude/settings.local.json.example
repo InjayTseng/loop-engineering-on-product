@@ -1,0 +1,29 @@
+{
+  "_comment": "Copy to .claude/settings.local.json (it is gitignored). Minimal allowlist for headless loop rounds. Note the push rule: only the loop branch — the framework's safety claim depends on it.",
+  "permissions": {
+    "allow": [
+      "Bash(git status:*)",
+      "Bash(git log:*)",
+      "Bash(git diff:*)",
+      "Bash(git add:*)",
+      "Bash(git commit:*)",
+      "Bash(git push origin loop)",
+      "Bash(git checkout -- *)",
+      "Bash(git stash push:*)",
+      "Bash(ls:*)",
+      "Bash(cat:*)",
+      "Bash(grep:*)",
+      "Bash(find:*)",
+      "Bash(mkdir:*)",
+      "Bash(node scripts/adapters/*)",
+      "Bash(scripts/adapters/*)",
+      "WebFetch(domain:docs.anthropic.com)",
+      "WebFetch(domain:github.com)"
+    ],
+    "deny": [
+      "Bash(git push origin main)",
+      "Bash(git push --force*)",
+      "Bash(git reset --hard*)"
+    ]
+  }
+}

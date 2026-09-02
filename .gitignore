@@ -1,0 +1,9 @@
+# loop runtime state (per-run logs, pid, parked marker) — never commit
+.loop/
+# adapter build products
+build/
+node_modules/
+# local screenshots
+*.png
+!docs/**/*.png
+.DS_Store
