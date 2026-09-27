@@ -15,6 +15,7 @@ cat > "$T/bin/claude" <<'STUB'
 #!/usr/bin/env bash
 Q="${STUB_QUEUE:?}"; line=$(head -1 "$Q"); tail -n +2 "$Q" > "$Q.tmp" && mv "$Q.tmp" "$Q"
 echo "stub call: $*" | head -c 900; echo
+case "$*" in *"Execute exactly ONE iteration"*) scripts/loop-event.sh step v 'stub "quoted" note \ back';; esac
 case "$line" in *SHIPPED*) echo "x" >> shipped.txt; git add shipped.txt; git -c user.name=t -c user.email=t@t commit -qm "loop: stub ship";; esac
 echo "$line"
 STUB
@@ -55,6 +56,19 @@ run_case "4 healthy rounds; TRAJ REDIRECT → next round RESET; recent categorie
 expect_not "STOP"
 grep -q 'RESET ROUND' .loop/round-003.log && echo "  ok   RESET note in round 3 prompt" || { echo "  FAIL RESET note"; FAIL=1; }
 grep -q 'Recently shipped categories (prefer a DIFFERENT one): a b' .loop/round-003.log && echo "  ok   recent categories = 'a b'" || { echo "  FAIL recent categories"; FAIL=1; }
+# structured events for the dashboard: every line is JSON; run/round/gate/step events all present
+ev=$(node -e '
+  const L = require("fs").readFileSync(".loop/events.jsonl","utf8").trim().split("\n").map(JSON.parse);
+  const c = (t, f = () => true) => L.filter(e => e.type === t && f(e)).length;
+  console.log([c("run_start"), c("round_start"), c("round_end", e => e.verdict === "SHIPPED" && /^[0-9a-f]{7,}$/.test(e.commit)),
+    c("traj", e => e.verdict === "REDIRECT"), c("step", e => e.node === "V" && e.round === 3 && e.note === "stub \"quoted\" note \\ back"), c("done")].join(" "));' 2>&1)
+[ "$ev" = "1 3 3 1 1 1" ] && echo "  ok   events.jsonl: run_start, 3 rounds, traj, agent step (round 3, escaped note), done" || { echo "  FAIL events.jsonl counts: $ev"; FAIL=1; }
+# the dashboard reads exactly what the driver wrote
+db=$(node --input-type=module -e '
+  const { buildState } = await import(process.cwd() + "/scripts/dashboard/state.mjs");
+  const s = buildState(process.cwd());
+  console.log([s.run.status, s.rounds.map(r => r.verdict).join(","), s.rounds[2].steps[0]?.node, s.rounds[1].gates.map(g => g.verdict).join(","), s.current].join(" "));' 2>&1)
+[ "$db" = "done SHIPPED,SHIPPED,SHIPPED V HEALTHY,REDIRECT " ] && echo "  ok   dashboard state from a real driver run: $db" || { echo "  FAIL dashboard state: $db"; FAIL=1; }
 
 run_case "5 SHIPPED claimed but HEAD unchanged → NOOP; 3 maintenance ships → stop" \
 "AUDIT: HEALTHY\nLOOP_RESULT: SHIPPED | category=maintenance | step=none | rejects=0\nLOOP_RESULT: SHIPPED | category=maintenance | step=none | rejects=0\nAUDIT: HEALTHY\nTRAJ: CONTINUE\nLOOP_RESULT: SHIPPED | category=maintenance | step=none | rejects=0\n" 10

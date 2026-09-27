@@ -26,7 +26,8 @@
 # Stop:   kill $(cat .loop/run.pid)      # also kills the round in flight
 # Logs:   .loop/loop.log (one line per event) · .loop/round-NNN.log · .loop/audit-NNN.log ·
 #         .loop/traj-NNN.log · .loop/position-NNN.log · .loop/state (WAITING_FOR_P when parked) ·
-#         .loop/jev.jsonl (every Jev call, any mode)
+#         .loop/jev.jsonl (every Jev call, any mode) · .loop/events.jsonl (structured run / round /
+#         step events for scripts/dashboard/; the round agent adds `step` events via scripts/loop-event.sh)
 #
 # Portability: written for macOS /bin/bash 3.2. Do NOT use `${arr[@]: -N}` (returns an empty
 # array when the array is shorter than N — the bug that silently disabled v2.1's plateau).
@@ -59,6 +60,8 @@ export JEV_MODE JEV_REJECT_P   # the round agent's own Jev calls (spec Step 2b, 
 LOGDIR="$ROOT/.loop"; mkdir -p "$LOGDIR"; echo $$ > "$LOGDIR/run.pid"
 trap 'pkill -P $$ 2>/dev/null; rm -f "$LOGDIR/run.pid"' EXIT
 say() { echo "$*" | tee -a "$LOGDIR/loop.log"; }
+# shellcheck source=loop-event.sh
+. "$ROOT/scripts/loop-event.sh"; export LOOP_EVENTS="$LOGDIR/events.jsonl"   # emit (see dashboard)
 pad() { printf '%03d' "$1"; }
 
 # --- result-line parsing ---------------------------------------------------------------------
@@ -90,27 +93,30 @@ done
 maint_flag=0
 run_audit() {   # $1 = round number for the log name
   local alog="$LOGDIR/audit-$(pad "$1").log"
-  say "  · state audit @ round $1 -> $alog"
+  say "  · state audit @ round $1 -> $alog"; emit audit_start "round#=$1"
   run_claude "$alog" "$LOOP_MODEL" "Spawn the state-auditor subagent (.claude/agents/state-auditor.md) to audit this repository and the running product from scratch and REWRITE $STATE. Report its final AUDIT: line verbatim as your last line."
   local A; A=$(resline "$alog" AUDIT); say "    ${A:-<no AUDIT line>}"
+  emit audit "round#=$1" "verdict=$(verdict "$alog" AUDIT)" "line=$A"
   [ "$(verdict "$alog" AUDIT)" = "BROKEN" ] && { maint_flag=1; say "    state BROKEN — next round forced MAINTENANCE"; }; return 0; }
 
 # --- node P (autonomous): two senior agents must agree -------------------------------------
 auto_pos=0
 run_autonomous_positioning() {   # returns 0 if positioning changed (continue), 1 otherwise (park)
   local plog="$LOGDIR/position-$(pad "$1").log"
-  say "  · autonomous positioning @ round $1 (attempt $((auto_pos+1))/$MAX_AUTO_POSITIONING) -> $plog"
+  say "  · autonomous positioning @ round $1 (attempt $((auto_pos+1))/$MAX_AUTO_POSITIONING) -> $plog"; emit position_start "round#=$1"
   run_claude "$plog" "$POSITIONING_MODEL" "Run the autonomous mode of .claude/commands/position.md: spawn strategist, then positioning-critic on its proposal; apply to SOFT fields of $POSITIONING only if the critic returns AGREED; mirror soft fields into loop.config.env. End with the POSITION: line verbatim."
   local P; P=$(resline "$plog" POSITION); say "    ${P:-<no POSITION line>}"
+  emit position "round#=$1" "verdict=$(verdict "$plog" POSITION)" "line=$P"
   if [ "$(verdict "$plog" POSITION)" = "AGREED" ]; then auto_pos=$((auto_pos+1)); return 0; fi
   return 1; }
 
 # --- node T: independent trajectory check -------------------------------------------------
 run_traj() {   # $1 round, $2 why → sets STOP / reset_flag from the TRAJ line
   local tlog="$LOGDIR/traj-$(pad "$1").log"
-  say "  · trajectory check @ round $1${2:+ ($2)}"
+  say "  · trajectory check @ round $1${2:+ ($2)}"; emit traj_start "round#=$1" "why=$2"
   run_claude "$tlog" "$LOOP_MODEL" "Spawn the trajectory-monitor subagent (.claude/agents/trajectory-monitor.md) over the last $TRAJ_EVERY commits, judged against $POSITIONING. Report its TRAJ: line verbatim as your last line."
   local T; T=$(resline "$tlog" TRAJ); say "    ${T:-<no TRAJ line>}"
+  emit traj "round#=$1" "verdict=$(verdict "$tlog" TRAJ)" "line=$T" "why=$2"
   case "$(verdict "$tlog" TRAJ)" in
     STOP)     STOP="trajectory monitor halted the run (round $1)" ;;
     REDIRECT) reset_flag=1 ;;
@@ -122,16 +128,19 @@ run_traj() {   # $1 round, $2 why → sets STOP / reset_flag from the TRAJ line
 jev_same_tactic() {   # $1 round
   [ "$JEV_MODE" = "off" ] && return 1
   local J; J=$("$JEV_BIN" same-tactic --n "$TRAJ_EVERY" 2>/dev/null | tr -d '`' | grep -E '^[[:space:]]*JEV:' | tail -1)
-  say "  · jev same-tactic: ${J:-<no JEV line>}"
+  say "  · jev same-tactic: ${J:-<no JEV line>}"; emit jev_same "round#=$1" "line=$J"
   [ "$JEV_MODE" = "prefilter" ] && [ "$(echo "$J" | sed -E 's/^[[:space:]]*JEV:[[:space:]]*([A-Z_]+).*/\1/')" = "SAME" ]; }
 
-park_for_human() { echo "WAITING_FOR_P: $1" > "$LOGDIR/state"; say "=== PARKED: $1 — positioning needs a human (/position). State is in $LOGDIR/state. ==="; }
+park_for_human() { echo "WAITING_FOR_P: $1" > "$LOGDIR/state"; emit park "reason=$1"; say "=== PARKED: $1 — positioning needs a human (/position). State is in $LOGDIR/state. ==="; }
 
 START=$(git rev-parse HEAD)
 consec_reject=0; consec_noop=0; consec_maint=0; reset_flag=0
 REJWIN=(); SHIPWIN=(); CATS=()
 rm -f "$LOGDIR/state"
 say "=== run-loop v3 START $(date '+%F %T') | N=$N model=$LOOP_MODEL branch=$LOOP_BRANCH window=$WINDOW plateau=${PLATEAU_REJ}/${PLATEAU_SHIP} audit_every=$AUDIT_EVERY traj_every=$TRAJ_EVERY auto_pos=$AUTONOMOUS_POSITIONING timeout=${ROUND_TIMEOUT}s jev=$JEV_MODE ==="
+emit run_start "n#=$N" "pid#=$$" "branch=$LOOP_BRANCH" "model=$LOOP_MODEL" "jev=$JEV_MODE" \
+  "window#=$WINDOW" "plateau_rej#=$PLATEAU_REJ" "plateau_ship#=$PLATEAU_SHIP" "max_consec_rejected#=$MAX_CONSEC_REJECTED" \
+  "max_noop#=$MAX_NOOP" "max_consec_maint#=$MAX_CONSEC_MAINT" "traj_every#=$TRAJ_EVERY" "audit_every#=$AUDIT_EVERY"
 [ "${SKIP_START_AUDIT:-0}" = "1" ] || run_audit 0
 
 i=0
@@ -146,6 +155,7 @@ while [ "$i" -lt "$N" ]; do
   [ "$JEV_MODE" != "off" ] && note+="JEV_MODE=$JEV_MODE: run the Jev pre-checks (spec Step 2b; validator step 3b) — they can only fast-reject; never skip an LLM gate on a Jev pass. "
   say "--- ROUND $i/$N @ $(date '+%T') (reset=$reset_flag maint=$maint_flag) -> $log"
   head_before=$(git rev-parse HEAD)
+  export LOOP_ROUND="$i"; emit round_start "round#=$i" "reset#=$reset_flag" "maint#=$maint_flag"
 
   run_claude "$log" "$LOOP_MODEL" "${note}Execute exactly ONE iteration of $LOOP_SPEC in this directory (git branch '$LOOP_BRANCH'). Read loop.config.env, $POSITIONING and $STATE first. Recently shipped categories (prefer a DIFFERENT one): ${recent:-none}. Rules: one small localized change; write a PRP every round; pass the value-critic gate (before building) AND the validator gate (after building, against the PRP) — both are independent subagents, never self-approve; commit and push origin $LOOP_BRANCH ONLY, never $DEPLOY_BRANCH. End your reply with the LOOP_RESULT line exactly as the spec defines it."
   maint_flag=0
@@ -178,9 +188,18 @@ while [ "$i" -lt "$N" ]; do
       say "     noop/no-result [consec=$consec_noop/$MAX_NOOP]"
       if [ "$consec_noop" -ge "$MAX_NOOP" ]; then
         say "=== STOP: $MAX_NOOP consecutive build/validate failures — structural, not a value problem. Fix the adapter or the product, then rerun. ==="
+        emit round_end "round#=$i" "verdict=${V:-NOOP}" "rejects#=$rj"
+        emit stop "round#=$i" "reason=$MAX_NOOP consecutive build/validate failures (structural)"
         break
       fi ;;
   esac
+
+  if [ "$V" = "SHIPPED" ]; then
+    emit round_end "round#=$i" "verdict=SHIPPED" "category=${cat:-}" "step=$(echo "$RES" | grep -oE 'step=[^|]+' | cut -d= -f2- | sed 's/[[:space:]]*$//')" \
+      "rejects#=$rj" "commit=$(git rev-parse --short HEAD)" "subject=$(git log -1 --format=%s)"
+  else
+    emit round_end "round#=$i" "verdict=${V:-NOOP}" "rejects#=$rj"
+  fi
 
   # --- plateau on rolling rejection RATE (v2.1, window fixed for bash 3.2) -------------------
   REJWIN+=("$rj"); SHIPWIN+=("$sh")
@@ -202,7 +221,7 @@ while [ "$i" -lt "$N" ]; do
 
   # --- a value STOP hands control to node P --------------------------------------------------
   if [ -n "$STOP" ]; then
-    say "=== STOP: $STOP ==="
+    say "=== STOP: $STOP ==="; emit stop "round#=$i" "reason=$STOP"
     if [ "$AUTONOMOUS_POSITIONING" = "true" ] && [ "$auto_pos" -lt "$MAX_AUTO_POSITIONING" ] && run_autonomous_positioning "$i"; then
       say "    positioning re-aimed by strategist+critic (pending human review) — resuming from node C"
       consec_reject=0; consec_noop=0; consec_maint=0; reset_flag=1; REJWIN=(); SHIPWIN=()
@@ -213,6 +232,7 @@ while [ "$i" -lt "$N" ]; do
   fi
 done
 
+emit done "rounds#=$i"
 say "=== run-loop v3 DONE $(date '+%F %T'). Shipped this run: ==="
 git log --oneline "$START"..HEAD | tee -a "$LOGDIR/loop.log"
 say "categories: ${CATS[*]:-none}"

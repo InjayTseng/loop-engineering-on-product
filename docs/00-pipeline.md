@@ -168,4 +168,5 @@ JEV:         OFF | SHADOW | PASS | ESCALATE | UNAVAILABLE | REJECT | SAME | DIST
 - 十條硬教訓與 v1→v2→v2.1 的數字：[06-lessons](06-lessons.md)
 - 換產品只換 adapter：[07-adapters](07-adapters.md)；五步裝進你的 repo：[08-adopt](08-adopt.md)
 - 選用：用 Jev 在 LLM gate 前快速拒絕：[09-jev](09-jev.md)
+- 看 loop 在做什麼：[10-dashboard](10-dashboard.md)（`events.jsonl` 由 driver 與 `scripts/loop-event.sh` 寫入，不是結果行，沒有 gate 讀它）
 - 真實實跑：`examples/web-v2-20-rounds/`（v2）與 `examples/ios-v1-112-iterations/`（v1 對照）

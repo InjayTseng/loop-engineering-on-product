@@ -84,6 +84,7 @@ flowchart TB
 | [07 Adapters](docs/07-adapters.md) | web / iOS 兩個現成 adapter + 新場景四問 |
 | [08 裝進你的 repo](docs/08-adopt.md) | 五步、驗收清單 |
 | [09 Jev 預篩（選用）](docs/09-jev.md) | 用 typed 判斷模型在 LLM gate 前快速拒絕：off → shadow → prefilter，先離線評估再上線 |
+| [10 開發者 Dashboard](docs/10-dashboard.md) | `node scripts/dashboard/serve.mjs`：本機唯讀網頁，看歷程、這一輪走到哪一步、離停機門檻多遠 |
 
 ## 真實實跑
 

@@ -26,6 +26,21 @@ honest change, starting from what the product actually is today.
 - Hard fields of positioning (target user, problem, trust rules, non-goals) are not yours to
   change. If research contradicts them, write it in the brief and let the round end REJECTED.
 
+## Progress events (for the dashboard; one command per step)
+
+At the START of every step below, and again whenever a retry sends you back to an earlier step,
+run:
+
+```bash
+scripts/loop-event.sh step <node> "<one line: what you are doing, naming the slice>"
+```
+
+Use these nodes: Step 0 → `C` · Step 1 → `R` · Step 1b → `M` · Steps 2 / 2b / 3 → `F` · Step 4 → `S` ·
+Step 5 and 6b → `D` · Step 6 → `B` · Step 7 → `V` · Step 8 → `Y`. The command takes well under a
+second and never fails the round. It is the only way anyone watching can see where a running
+round is, because the driver only learns the result when the round ends. It is not a result line,
+and no gate reads it.
+
 ## Step 0 — Current state, light (node C)
 
 1. `loop.config.env`; `product/positioning.md`; `product/state.md` (frontmatter `verdict`
