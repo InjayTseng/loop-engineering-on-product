@@ -26,6 +26,14 @@
 
 不對稱的理由：錯誤放行會出貨一個壞東西，這正是 v2 的三個漏網（「今日已有 N 人…」兩條、「今日熱門」一條）。錯誤拒絕只是少做一個想法，而且 ledger 裡會留下 `Jev fast-reject: <原因>`，人和 state-auditor 都看得到。所以 Jev 只放在「拒絕」這一側。
 
+## 已修的坑：想法跟自己比對
+
+第一次真實使用時，`cf-billing` 被 Jev 判成「重複」（p=0.94）。原因：`/research`（Step 1）和 Step 2 都會先把這一輪的想法寫成 `[IN_PROGRESS]` 進 ledger，Step 2b 的預篩再拿整份 ledger 問「跟 ledger 裡哪一條重複？」，結果找到的正是它自己。離線評估和 shadow 對照都沒抓到：評估重播時只給「之前的」ledger，少了這一行，跟真實一輪的順序不一樣。
+
+修法（`scripts/jev/ledger.mjs`）：預篩一律不把 `[IN_PROGRESS]` 行給 Jev。Step 0 已經把崩潰留下的 `[IN_PROGRESS]` 處理掉（續做或標 FAILED），所以到 Step 2b 時剩下的 `[IN_PROGRESS]` 只會是這一輪自己的想法。其他狀態（REJECTED / COMPLETED / FAILED / LOW_IMPACT）照樣保留，因為那些才是真正的重複。評估也改成把該想法的 `[IN_PROGRESS]` 行放進重播用的 ledger，跟真實一輪一致。`npm test` 有回歸測試：mock 的答案是 state 的 hash，所以「加不加自己那一行，答案完全相同」就代表那一行沒送到 Jev。
+
+教訓：離線評估要重現的是**真實一輪當下的輸入**，不只是「當時的歷史資料」。
+
 ## 三個模式
 
 ```
@@ -54,6 +62,7 @@ mock backend 上 `eval-backlog.mjs` 會印出 20 條誤殺（最後一行是 `MO
 | 檔案 | 作用 |
 |---|---|
 | `scripts/jev/jev.mjs` | 四個任務（`prefilter` / `same-tactic` / `label-promise` / `pick`），一律 exit 0，只印一行 `JEV:`；每次呼叫寫進 `.loop/jev.jsonl` |
+| `scripts/jev/ledger.mjs` | 預篩看得到的 ledger：去掉這一輪自己的 `[IN_PROGRESS]` 行 |
 | `scripts/jev/eval-backlog.mjs` | 離線評估，最後一行 `JEV_EVAL:` |
 | `scripts/jev/test/jev.test.mjs` | `npm test`：用 `JEV_BACKEND=mock` + `JEV_MOCK_SCRIPT` 固定每題答案，驗證每一條分流規則 |
 | `scripts/test-driver.sh` 劇本 8–10 | driver 端：prefilter 的 SAME 會提前跑 T；shadow 就算收到 SAME 也不動；off 完全不呼叫；UNAVAILABLE 不動 |

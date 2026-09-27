@@ -69,6 +69,9 @@ Size the slice — it sets PRD depth and risk, not whether a PRD exists:
 ## Step 2b — Jev pre-check (only when `JEV_MODE` is not `off`; docs/09-jev.md)
 Run `scripts/jev/jev.mjs prefilter --idea "<title> — <mechanism> — <funnel stage>"` and paste its
 `JEV:` line into the backlog entry. Jev can only fast-reject; it never approves.
+Order does not matter: the prefilter ignores `[IN_PROGRESS]` ledger lines, because after Step 0
+those are this round's own idea (written by `/research` and Step 2). Comparing the idea with
+itself would make every idea look like a duplicate.
 - `JEV: REJECT — <reason>`: treat it exactly like a value-gate REJECT with no REDIRECT. Count
   it in `rejects=N`, write `- [REJECTED] <title> — Jev fast-reject: <reason>` in the ledger, and
   go back to Step 1 with a different angle. This counts toward the 2 retries.

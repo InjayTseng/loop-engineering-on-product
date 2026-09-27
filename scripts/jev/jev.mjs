@@ -27,6 +27,7 @@ import { execFileSync } from "node:child_process";
 import { appendFileSync, existsSync, mkdirSync, readFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { ledgerForPrefilter } from "./ledger.mjs";
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
 const MODE = (process.env.JEV_MODE || "off").toLowerCase();
@@ -72,7 +73,7 @@ function task(name, a, { check, pick }) {
         state: {
           idea: a.idea,
           positioning: readTail(process.env.POSITIONING || "product/positioning.md", 400, 40000),
-          idea_ledger: readTail(process.env.LEDGER || ".claude/tasks/_idea_ledger.md", 200, 40000),
+          idea_ledger: ledgerForPrefilter(readTail(process.env.LEDGER || ".claude/tasks/_idea_ledger.md", 200, 40000)),
         },
         questions: {
           fabricated: check("Does the idea rely on fabricated signals — invented or seeded counts, fake popularity, made-up testimonials, manufactured scarcity — instead of real data?", {

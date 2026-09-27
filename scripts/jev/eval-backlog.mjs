@@ -3,7 +3,8 @@
 //
 // Replays every idea of a past run's backlog through `jev.mjs prefilter` in chronological order,
 // with the ledger as it stood BEFORE that idea (so duplicate detection sees only the past), and
-// compares Jev's fast-rejects with what actually happened:
+// compares Jev's fast-rejects with what actually happened (the ledger also carries the idea's own
+// `[IN_PROGRESS]` line, as it does live):
 //   • REJECTED lines                   → value-critic rejected it (a fast-reject here is correct)
 //   • COMPLETED lines with a fabricated → shipped, but the v2.1 trust gate says it should have been
 //     signal (FABRICATED below)          rejected (a fast-reject here catches a real escape)
@@ -40,7 +41,10 @@ for (const i of ideaIdx) {
   const idea = line.replace(/^- \[\w+\]\s*/, "").split(/[:：]\s*value-critic|——value-critic|value-critic 判定/)[0].slice(0, 600);
   const truth = status === "REJECTED" ? "rejected" : FABRICATED.test(line) ? "fabricated" : "legit";
   const ledger = join(tmp, "ledger.md");
-  writeFileSync(ledger, lines.slice(0, i).filter((l) => l.startsWith("- [")).join("\n") + "\n");
+  // The ledger exactly as a live round has it at Step 2b: the past, PLUS this idea's own
+  // `[IN_PROGRESS]` line (written by /research and Step 2). Omitting it hid a self-match
+  // false-reject bug from this eval (docs/09-jev.md).
+  writeFileSync(ledger, [...lines.slice(0, i).filter((l) => l.startsWith("- [")), `- [IN_PROGRESS] ${idea}`].join("\n") + "\n");
   let res = "";
   try {
     res = execFileSync("node", [join(ROOT, "scripts/jev/jev.mjs"), "prefilter", "--idea", idea], {

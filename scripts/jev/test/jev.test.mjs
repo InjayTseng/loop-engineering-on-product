@@ -2,10 +2,11 @@
 // JEV_MOCK_SCRIPT pins each question's answer, so every routing rule is asserted without a network.
 // Usage: cd scripts/jev && npm ci && npm test       (exit 0 = all pass)
 import { execFileSync } from "node:child_process";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { ledgerForPrefilter } from "../ledger.mjs";
 
 const JEV = resolve(dirname(fileURLToPath(import.meta.url)), "../jev.mjs");
 let fail = 0;
@@ -48,6 +49,24 @@ console.log("### pick");
 expect("pick returns the chosen key", run(["pick", "--question", "Which moves activation most?", "--option", "a=hint copy", "--option", "b=one-tap sample"],
   script({ best: { answer: "b", confidence: 0.9 } })), /^JEV: PICK b — conf=0\.90/);
 expect("pick needs two options", run(["pick", "--question", "q", "--option", "a=x"]), /^JEV: ESCALATE/);
+
+console.log("### ledger self-match (regression: the idea's own [IN_PROGRESS] line was shown to Jev)");
+const past = "- [COMPLETED] share chip: copy text\n- [REJECTED] streak badge — no re-entry trigger\n";
+const self = "- [IN_PROGRESS] cf-billing: reserve balance per ticket\n";
+expect("helper drops IN_PROGRESS, keeps every other status", ledgerForPrefilter(past + self), /^- \[COMPLETED\].*\n- \[REJECTED\].*\n$/);
+expect("helper keeps an indented or mid-text mention", ledgerForPrefilter("- [REJECTED] was [IN_PROGRESS] once\n"), /^- \[REJECTED\]/);
+// Mock answers hash the state, so equal answers ⇔ Jev saw the same ledger.
+const dir = mkdtempSync(join(tmpdir(), "jev-ledger-"));
+const LOG = resolve(dirname(JEV), "../../.loop/jev.jsonl");
+const answersWith = (ledgerText) => {
+  const p = join(dir, "ledger.md"); writeFileSync(p, ledgerText);
+  run(["prefilter", "--idea", "cf-billing: reserve balance per ticket"], { LEDGER: p, POSITIONING: join(dir, "none.md") });
+  return JSON.stringify(JSON.parse(readFileSync(LOG, "utf8").trim().split("\n").pop()).answers);
+};
+const base = answersWith(past);
+expect("own IN_PROGRESS line does not reach Jev", answersWith(past + self) === base ? "same" : "differs", /^same$/);
+expect("a REJECTED twin does reach Jev (test is sensitive)", answersWith(past + "- [REJECTED] cf-billing: reserve balance per ticket\n") === base ? "same" : "differs", /^differs$/);
+rmSync(dir, { recursive: true, force: true });
 
 console.log("### same-tactic (reads git log in cwd)");
 const repo = mkdtempSync(join(tmpdir(), "jev-test-"));
