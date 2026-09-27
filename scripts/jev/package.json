@@ -1,0 +1,12 @@
+{
+  "name": "loop-jev",
+  "private": true,
+  "description": "Optional Jev (TypeSafe judgment model) pre-checks for the loop's gates. See docs/09-jev.md.",
+  "type": "module",
+  "scripts": {
+    "test": "node test/jev.test.mjs"
+  },
+  "dependencies": {
+    "jev-use": "0.8.0"
+  }
+}

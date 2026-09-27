@@ -83,6 +83,7 @@ flowchart TB
 | [06 十條硬教訓](docs/06-lessons.md) | v1 → v2 → v2.1 → v3，含 v2.1 plateau 從未能觸發的 bash 3.2 bug |
 | [07 Adapters](docs/07-adapters.md) | web / iOS 兩個現成 adapter + 新場景四問 |
 | [08 裝進你的 repo](docs/08-adopt.md) | 五步、驗收清單 |
+| [09 Jev 預篩（選用）](docs/09-jev.md) | 用 typed 判斷模型在 LLM gate 前快速拒絕：off → shadow → prefilter，先離線評估再上線 |
 
 ## 真實實跑
 

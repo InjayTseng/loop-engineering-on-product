@@ -80,4 +80,38 @@ chmod +x "$T/bin/hang"; rm -rf .loop
 env CLAUDE_BIN="$T/bin/hang" SKIP_START_AUDIT=1 ROUND_TIMEOUT=2 MAX_NOOP=1 scripts/run-loop.sh 1 >/dev/null 2>&1
 grep -q "TIMEOUT after 2s" .loop/round-001.log && grep -q "noop/no-result" .loop/loop.log && echo "  ok   timeout → NOOP" || { echo "  FAIL timeout"; FAIL=1; }
 
+# --- Jev (docs/09-jev.md): a stubbed JEV_BIN pops one line per call from its own queue -------
+cat > "$T/bin/jev" <<'J'
+#!/usr/bin/env bash
+echo "$*" >> "${JEV_CALLS:?}"; Q="${JEV_QUEUE:?}"; line=$(head -1 "$Q"); tail -n +2 "$Q" > "$Q.tmp" && mv "$Q.tmp" "$Q"
+echo "$line"
+J
+chmod +x "$T/bin/jev"
+jev_case() { local name="$1" queue="$2" jq="$3" n="$4"; shift 4
+  printf '%b' "$jq" > "$T/jq.txt"; : > "$T/jcalls.txt"
+  run_case "$name" "$queue" "$n" JEV_BIN="$T/bin/jev" JEV_QUEUE="$T/jq.txt" JEV_CALLS="$T/jcalls.txt" "$@"; }
+
+jev_case "8 JEV prefilter: SAME after a ship → early trajectory check → REDIRECT → next round RESET" \
+"AUDIT: HEALTHY\nLOOP_RESULT: SHIPPED | category=a | step=s | rejects=0\nTRAJ: REDIRECT — same nudge again\nLOOP_RESULT: SHIPPED | category=b | step=s | rejects=0\nAUDIT: HEALTHY\nTRAJ: CONTINUE\n" \
+"\`JEV: SAME — p=0.93; run the trajectory-monitor now\`\nJEV: DISTINCT — p=0.10\n" 2 JEV_MODE=prefilter
+expect "jev same-tactic: JEV: SAME"
+expect "trajectory check @ round 1 \(early: Jev flagged a repeated tactic\)"
+expect "trajectory check @ round 2$"
+expect "jev=prefilter"
+grep -q 'RESET ROUND' .loop/round-002.log && echo "  ok   RESET note in round 2 prompt" || { echo "  FAIL RESET note after early REDIRECT"; FAIL=1; }
+grep -q 'JEV_MODE=prefilter: run the Jev pre-checks' .loop/round-001.log && echo "  ok   Jev note in round prompt" || { echo "  FAIL Jev note"; FAIL=1; }
+
+jev_case "9 JEV shadow: even a SAME line never triggers anything" \
+"AUDIT: HEALTHY\nLOOP_RESULT: SHIPPED | category=a | step=s | rejects=0\n" "JEV: SAME — p=0.99\n" 1 JEV_MODE=shadow
+expect "jev same-tactic: JEV: SAME"
+expect_not "trajectory check"
+
+jev_case "10 JEV off (default): Jev is never called; UNAVAILABLE in prefilter is a no-op" \
+"AUDIT: HEALTHY\nLOOP_RESULT: SHIPPED | category=a | step=s | rejects=0\n" "JEV: SAME\n" 1
+[ -s "$T/jcalls.txt" ] && { echo "  FAIL Jev called with JEV_MODE unset"; FAIL=1; } || echo "  ok   Jev not called"
+expect_not "jev same-tactic"
+jev_case "10b" "AUDIT: HEALTHY\nLOOP_RESULT: SHIPPED | category=a | step=s | rejects=0\n" "JEV: UNAVAILABLE — no key\n" 1 JEV_MODE=prefilter
+expect "jev same-tactic: JEV: UNAVAILABLE"
+expect_not "trajectory check"
+
 [ "$FAIL" = 0 ] && echo "ALL DRIVER TESTS PASSED" || { echo "DRIVER TESTS FAILED"; exit 1; }

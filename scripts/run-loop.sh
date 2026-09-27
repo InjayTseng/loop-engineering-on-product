@@ -12,7 +12,9 @@
 #   • plateau            — stops on rolling REJECTION RATE (rejects per shipped idea), not on
 #                          "N consecutive fully-rejected rounds" (that signal never fires; v2.1)
 #   • reset              — a rejected round forces the next round to a different funnel angle
-#   • trajectory (T)     — every $TRAJ_EVERY rounds an independent agent checks for drift
+#   • trajectory (T)     — every $TRAJ_EVERY rounds an independent agent checks for drift;
+#                          with JEV_MODE=prefilter also EARLY, when Jev flags a shipped change as
+#                          the same tactic as a recent one (Jev only triggers T, T still decides)
 #   • positioning (P)    — on a value STOP, optionally lets strategist + positioning-critic re-aim
 #                          the soft fields (AUTONOMOUS_POSITIONING=true), at most
 #                          $MAX_AUTO_POSITIONING times; otherwise parks and waits for a human
@@ -20,10 +22,11 @@
 #
 # Usage:  scripts/run-loop.sh [N]        # N overrides ROUNDS from loop.config.env
 # Env:    CONFIG (loop.config.env) · CLAUDE_BIN (claude) · any config key (env beats file) ·
-#         SKIP_START_AUDIT=1 · ROUND_TIMEOUT (1800)
+#         SKIP_START_AUDIT=1 · ROUND_TIMEOUT (1800) · JEV_BIN (scripts/jev/jev.mjs; docs/09-jev.md)
 # Stop:   kill $(cat .loop/run.pid)      # also kills the round in flight
 # Logs:   .loop/loop.log (one line per event) · .loop/round-NNN.log · .loop/audit-NNN.log ·
-#         .loop/traj-NNN.log · .loop/position-NNN.log · .loop/state (WAITING_FOR_P when parked)
+#         .loop/traj-NNN.log · .loop/position-NNN.log · .loop/state (WAITING_FOR_P when parked) ·
+#         .loop/jev.jsonl (every Jev call, any mode)
 #
 # Portability: written for macOS /bin/bash 3.2. Do NOT use `${arr[@]: -N}` (returns an empty
 # array when the array is shorter than N — the bug that silently disabled v2.1's plateau).
@@ -33,7 +36,7 @@ ROOT="$(cd "$(dirname "$0")/.." && pwd)"; cd "$ROOT"
 CONFIG="${CONFIG:-loop.config.env}"
 [ -f "$CONFIG" ] || { echo "REFUSE: $CONFIG not found. Copy and fill loop.config.env first."; exit 1; }
 # Environment overrides beat the config file (documented usage: LOOP_MODEL=... scripts/run-loop.sh).
-OVERRIDABLE="ROUNDS LOOP_MODEL POSITIONING_MODEL LOOP_BRANCH DEPLOY_BRANCH WINDOW PLATEAU_REJ PLATEAU_SHIP MAX_CONSEC_REJECTED MAX_NOOP MAX_CONSEC_MAINT TRAJ_EVERY AUDIT_EVERY AUTONOMOUS_POSITIONING MAX_AUTO_POSITIONING LOOP_SPEC POSITIONING STATE ROUND_TIMEOUT"
+OVERRIDABLE="ROUNDS LOOP_MODEL POSITIONING_MODEL LOOP_BRANCH DEPLOY_BRANCH WINDOW PLATEAU_REJ PLATEAU_SHIP MAX_CONSEC_REJECTED MAX_NOOP MAX_CONSEC_MAINT TRAJ_EVERY AUDIT_EVERY AUTONOMOUS_POSITIONING MAX_AUTO_POSITIONING LOOP_SPEC POSITIONING STATE ROUND_TIMEOUT JEV_MODE JEV_REJECT_P"
 for v in $OVERRIDABLE; do eval "_env_$v=\${$v-__unset__}"; done
 # shellcheck disable=SC1090
 set -a; . "$CONFIG"; set +a
@@ -51,6 +54,8 @@ AUTONOMOUS_POSITIONING="${AUTONOMOUS_POSITIONING:-false}"; MAX_AUTO_POSITIONING=
 LOOP_SPEC="${LOOP_SPEC:-.claude/tasks/innovation_loop.md}"
 POSITIONING="${POSITIONING:-product/positioning.md}"; STATE="${STATE:-product/state.md}"
 ROUND_TIMEOUT="${ROUND_TIMEOUT:-1800}"
+JEV_MODE="${JEV_MODE:-off}"; JEV_REJECT_P="${JEV_REJECT_P:-0.85}"; JEV_BIN="${JEV_BIN:-$ROOT/scripts/jev/jev.mjs}"
+export JEV_MODE JEV_REJECT_P   # the round agent's own Jev calls (spec Step 2b, validator 3b) inherit the mode
 LOGDIR="$ROOT/.loop"; mkdir -p "$LOGDIR"; echo $$ > "$LOGDIR/run.pid"
 trap 'pkill -P $$ 2>/dev/null; rm -f "$LOGDIR/run.pid"' EXIT
 say() { echo "$*" | tee -a "$LOGDIR/loop.log"; }
@@ -100,24 +105,45 @@ run_autonomous_positioning() {   # returns 0 if positioning changed (continue), 
   if [ "$(verdict "$plog" POSITION)" = "AGREED" ]; then auto_pos=$((auto_pos+1)); return 0; fi
   return 1; }
 
+# --- node T: independent trajectory check -------------------------------------------------
+run_traj() {   # $1 round, $2 why → sets STOP / reset_flag from the TRAJ line
+  local tlog="$LOGDIR/traj-$(pad "$1").log"
+  say "  · trajectory check @ round $1${2:+ ($2)}"
+  run_claude "$tlog" "$LOOP_MODEL" "Spawn the trajectory-monitor subagent (.claude/agents/trajectory-monitor.md) over the last $TRAJ_EVERY commits, judged against $POSITIONING. Report its TRAJ: line verbatim as your last line."
+  local T; T=$(resline "$tlog" TRAJ); say "    ${T:-<no TRAJ line>}"
+  case "$(verdict "$tlog" TRAJ)" in
+    STOP)     STOP="trajectory monitor halted the run (round $1)" ;;
+    REDIRECT) reset_flag=1 ;;
+  esac; return 0; }
+
+# --- Jev same-tactic pre-check (optional, docs/09-jev.md) -----------------------------------
+# Only ever returns "run T early" (0) or "nothing" (1). It cannot stop, reset or ship anything:
+# shadow mode just logs, and an OFF / UNAVAILABLE / ESCALATE / DISTINCT line is a no-op.
+jev_same_tactic() {   # $1 round
+  [ "$JEV_MODE" = "off" ] && return 1
+  local J; J=$("$JEV_BIN" same-tactic --n "$TRAJ_EVERY" 2>/dev/null | tr -d '`' | grep -E '^[[:space:]]*JEV:' | tail -1)
+  say "  · jev same-tactic: ${J:-<no JEV line>}"
+  [ "$JEV_MODE" = "prefilter" ] && [ "$(echo "$J" | sed -E 's/^[[:space:]]*JEV:[[:space:]]*([A-Z_]+).*/\1/')" = "SAME" ]; }
+
 park_for_human() { echo "WAITING_FOR_P: $1" > "$LOGDIR/state"; say "=== PARKED: $1 — positioning needs a human (/position). State is in $LOGDIR/state. ==="; }
 
 START=$(git rev-parse HEAD)
 consec_reject=0; consec_noop=0; consec_maint=0; reset_flag=0
 REJWIN=(); SHIPWIN=(); CATS=()
 rm -f "$LOGDIR/state"
-say "=== run-loop v3 START $(date '+%F %T') | N=$N model=$LOOP_MODEL branch=$LOOP_BRANCH window=$WINDOW plateau=${PLATEAU_REJ}/${PLATEAU_SHIP} audit_every=$AUDIT_EVERY traj_every=$TRAJ_EVERY auto_pos=$AUTONOMOUS_POSITIONING timeout=${ROUND_TIMEOUT}s ==="
+say "=== run-loop v3 START $(date '+%F %T') | N=$N model=$LOOP_MODEL branch=$LOOP_BRANCH window=$WINDOW plateau=${PLATEAU_REJ}/${PLATEAU_SHIP} audit_every=$AUDIT_EVERY traj_every=$TRAJ_EVERY auto_pos=$AUTONOMOUS_POSITIONING timeout=${ROUND_TIMEOUT}s jev=$JEV_MODE ==="
 [ "${SKIP_START_AUDIT:-0}" = "1" ] || run_audit 0
 
 i=0
 while [ "$i" -lt "$N" ]; do
-  i=$((i+1)); STOP=""
+  i=$((i+1)); STOP=""; early_traj=0
   check_branch
   log="$LOGDIR/round-$(pad "$i").log"
   n=${#CATS[@]}; s=$(( n > 4 ? n - 4 : 0 )); recent="${CATS[*]:$s}"   # last 4, bash-3.2-safe
   note=""
   [ "$reset_flag" = "1" ] && note+="THIS IS A RESET ROUND: the value gate rejected recent ideas — deliberately pick a DIFFERENT funnel stage / category from the recent ones and think from scratch. "
   [ "$maint_flag" = "1" ] && note+="THIS IS A MAINTENANCE ROUND: $STATE reports BROKEN — fix what it lists, do not add features (Step 1b). "
+  [ "$JEV_MODE" != "off" ] && note+="JEV_MODE=$JEV_MODE: run the Jev pre-checks (spec Step 2b; validator step 3b) — they can only fast-reject; never skip an LLM gate on a Jev pass. "
   say "--- ROUND $i/$N @ $(date '+%T') (reset=$reset_flag maint=$maint_flag) -> $log"
   head_before=$(git rev-parse HEAD)
 
@@ -138,6 +164,7 @@ while [ "$i" -lt "$N" ]; do
       cat=$(echo "$RES" | grep -oE 'category=[A-Za-z0-9_-]+' | cut -d= -f2); CATS+=("${cat:-?}")
       if [ "${cat:-}" = "maintenance" ]; then consec_maint=$((consec_maint+1)); else consec_maint=0; fi
       say "     shipped: $(git log --oneline -1)"
+      jev_same_tactic "$i" && early_traj=1
       [ "$consec_maint" -ge "$MAX_CONSEC_MAINT" ] && STOP="$MAX_CONSEC_MAINT consecutive maintenance rounds — research is dry" ;;
     REJECTED)
       consec_reject=$((consec_reject+1)); consec_noop=0
@@ -168,15 +195,9 @@ while [ "$i" -lt "$N" ]; do
 
   # --- node C (deep) and node T, every K / N rounds ------------------------------------------
   if [ -z "$STOP" ] && [ $((i % AUDIT_EVERY)) -eq 0 ]; then run_audit "$i"; fi
-  if [ -z "$STOP" ] && [ $((i % TRAJ_EVERY)) -eq 0 ]; then
-    tlog="$LOGDIR/traj-$(pad "$i").log"
-    say "  · trajectory check @ round $i"
-    run_claude "$tlog" "$LOOP_MODEL" "Spawn the trajectory-monitor subagent (.claude/agents/trajectory-monitor.md) over the last $TRAJ_EVERY commits, judged against $POSITIONING. Report its TRAJ: line verbatim as your last line."
-    T=$(resline "$tlog" TRAJ); say "    ${T:-<no TRAJ line>}"
-    case "$(verdict "$tlog" TRAJ)" in
-      STOP)     STOP="trajectory monitor halted the run (round $i)" ;;
-      REDIRECT) reset_flag=1 ;;
-    esac
+  if [ -z "$STOP" ]; then
+    if [ $((i % TRAJ_EVERY)) -eq 0 ]; then run_traj "$i" ""
+    elif [ "$early_traj" = "1" ]; then run_traj "$i" "early: Jev flagged a repeated tactic"; fi
   fi
 
   # --- a value STOP hands control to node P --------------------------------------------------

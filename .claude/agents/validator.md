@@ -36,6 +36,11 @@ routes back to the spec step instead of the builder.
 3. Verify the SPECIFIC claim and each success criterion against what you actually observed —
    not "it runs" but "the exact thing the PRD promised is present and behaves as described".
    Run the PRD's own validation commands (lint / unit / integration levels) and record results.
+3b. Jev label check (only when `JEV_MODE` is not `off`; docs/09-jev.md): for each touched CTA,
+   run `scripts/jev/jev.mjs label-promise --label "<label>" --observed "<what you saw it do>"`
+   and put the `JEV:` line in EVIDENCE. `JEV: MISMATCH` means axis 4 fails, with that line as
+   the blocker. Any other line changes nothing: score axis 4 from your own evidence. Never
+   Pass axis 4 because Jev said PASS.
 4. Score the rubric below. Any axis you cannot confirm from evidence is a gap, not a pass.
 
 ## Scorecard (Pass / Partial / Fail each)

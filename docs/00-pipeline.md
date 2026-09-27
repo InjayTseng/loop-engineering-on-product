@@ -129,6 +129,7 @@ flowchart LR
 | Y | git 指令（spec 內固定） | deterministic |
 | T | `.claude/agents/trajectory-monitor.md` | latent |
 | driver | `scripts/run-loop.sh` + `loop.config.env` | deterministic |
+| （選用）Jev 預篩 | `scripts/jev/jev.mjs`：F 前、V 內、R 選題、driver 的 T 提前觸發；只能快速拒絕，不能放行（[09-jev](09-jev.md)） | latent（typed 判斷，非生成）、deterministic parse |
 
 只有 adapter（B 怎麼 build、怎麼觀察、什麼算壞）隨產品變；其餘節點、gate、回邊、協定全部照用。iOS（健康 app，外部 run，本 repo 未附 log）與 web（v2 測試場，log 在 `examples/`）兩個 adapter 都實跑過（N=2），才敢抽這層。
 
@@ -146,6 +147,7 @@ TRAJ:        CONTINUE | REDIRECT | STOP
 LOOP_RESULT: SHIPPED | category=<c> | step=<s> | rejects=<N>
 LOOP_RESULT: REJECTED | rejects=<N>
 LOOP_RESULT: NOOP | rejects=<N>
+JEV:         OFF | SHADOW | PASS | ESCALATE | UNAVAILABLE | REJECT | SAME | DISTINCT | MISMATCH | PICK <key>   （選用，09-jev）
 ```
 
 `rejects=N` 每輪必帶（0 也寫）。driver 用它算滾動拒絕率；沒有它 plateau 偵測是瞎的（v2 的實際教訓：只看「整輪全拒」，20 輪內 17 個被拒想法一個都沒接到訊號；而且即使用 v2.1 的拒絕率規則，那筆資料也不會觸發——plateau 規則至今沒有真實正例，見教訓 2 與 10）。
@@ -165,4 +167,5 @@ LOOP_RESULT: NOOP | rejects=<N>
 - driver 與停機：[05-loop](05-loop.md)
 - 十條硬教訓與 v1→v2→v2.1 的數字：[06-lessons](06-lessons.md)
 - 換產品只換 adapter：[07-adapters](07-adapters.md)；五步裝進你的 repo：[08-adopt](08-adopt.md)
+- 選用：用 Jev 在 LLM gate 前快速拒絕：[09-jev](09-jev.md)
 - 真實實跑：`examples/web-v2-20-rounds/`（v2）與 `examples/ios-v1-112-iterations/`（v1 對照）

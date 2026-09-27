@@ -66,9 +66,18 @@ Size the slice — it sets PRD depth and risk, not whether a PRD exists:
 | M | small feature (one view + its model) | 3–6 |
 | L | full module (model + service + view + tests) | 6+ |
 
+## Step 2b — Jev pre-check (only when `JEV_MODE` is not `off`; docs/09-jev.md)
+Run `scripts/jev/jev.mjs prefilter --idea "<title> — <mechanism> — <funnel stage>"` and paste its
+`JEV:` line into the backlog entry. Jev can only fast-reject; it never approves.
+- `JEV: REJECT — <reason>`: treat it exactly like a value-gate REJECT with no REDIRECT. Count
+  it in `rejects=N`, write `- [REJECTED] <title> — Jev fast-reject: <reason>` in the ledger, and
+  go back to Step 1 with a different angle. This counts toward the 2 retries.
+- Any other line (`PASS`, `ESCALATE`, `UNAVAILABLE`, `SHADOW`, `OFF`) → Step 3 as usual.
+- Never show the `JEV:` line to value-critic. Its judgment must stay independent.
+
 ## Step 3 — VALUE GATE (node F; mandatory; independent)
 Spawn `value-critic` with: the idea, funnel stage, category, brief path. Count every idea it
-rejects this round, including retries → `rejects=N` in LOOP_RESULT.
+rejects this round, including retries, plus every Jev fast-reject → `rejects=N` in LOOP_RESULT.
 - `VALUE: ACCEPT` → Step 4.
 - `VALUE: REJECT` → take its REDIRECT as the new angle, back to Step 1 (max 2 retries). Still
   rejected → emit `LOOP_RESULT: REJECTED | rejects=<N>`; write no code.
@@ -130,3 +139,5 @@ rejection rate from it; without it the plateau detector is blind.
 - Fabricated social proof or scarcity on a trust product — even if it "would move the funnel".
 - Shipping a CTA whose label promises something its handler does not do.
 - Building on a stage `state.md` says is broken.
+- Skipping value-critic or validator because Jev said PASS (Jev only fast-rejects), or routing
+  on a `JEV: SHADOW` line.

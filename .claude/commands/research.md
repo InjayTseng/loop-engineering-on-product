@@ -35,6 +35,14 @@ Use `research/TEMPLATE.md`. Save as `research/briefs/YYYY-MM-DD-<slug>.md`. Requ
   because Z"), size (S/M/L), the one localized change, honest-data check (no fabricated signals)
 - Suggested claim for the validator — the exact observable thing that will be true when it ships
 
+## Choosing between candidates (only when `JEV_MODE` is not `off`)
+
+If you narrowed things to 2–4 candidate slices and must write up one, run
+`scripts/jev/jev.mjs pick --question "Which candidate most plausibly moves <next stage to push>?" --option a="<slice A>" --option b="<slice B>"`
+and record the `JEV:` line in the brief. `JEV: PICK <key>` in prefilter mode: write that slice
+up. Anything else, or shadow mode: choose yourself. Either way the chosen slice still goes
+through value-critic.
+
 ## Hand off
 
 Append `- [IN_PROGRESS] <title>` to the ledger. Do NOT spawn `value-critic` here and do NOT write
