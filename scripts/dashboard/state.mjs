@@ -148,7 +148,7 @@ export function stopMeters(events, cfg) {
   const sumr = rej.reduce((a, b) => a + b, 0), sums = shp.reduce((a, b) => a + b, 0), full = shp.length >= W;
   return [
     { key: "plateau", label: "拒絕率 plateau", detail: `近 ${shp.length}/${W} 輪：拒絕 ${sumr} 個點子、出貨 ${sums} 輪；${PR}×拒絕 ≥ ${PS}×出貨 時停`,
-      value: PR * sumr, limit: PS * Math.max(sums, 1), armed: full && sums > 0, fired: full && sums > 0 && PR * sumr >= PS * sums },
+      value: PR * sumr, limit: PS * Math.max(sums, 1), window: W, armed: full && sums > 0, fired: full && sums > 0 && PR * sumr >= PS * sums },
     { key: "consec_reject", label: "連續整輪被拒", detail: "第 1 次強制 RESET，RESET 輪仍全拒就停", value: cr, limit: NUM(cfg.MAX_CONSEC_REJECTED, 2), armed: true, fired: cr >= NUM(cfg.MAX_CONSEC_REJECTED, 2) },
     { key: "consec_noop", label: "連續 NOOP（建置／驗證放棄）", detail: "結構性問題，要人修 adapter 或產品", value: cn, limit: NUM(cfg.MAX_NOOP, 3), armed: true, fired: cn >= NUM(cfg.MAX_NOOP, 3) },
     { key: "consec_maint", label: "連續維護輪", detail: "研究已乾，交回定位節點 P", value: cm, limit: NUM(cfg.MAX_CONSEC_MAINT, 3), armed: true, fired: cm >= NUM(cfg.MAX_CONSEC_MAINT, 3) },

@@ -6,7 +6,7 @@
 node scripts/dashboard/serve.mjs            # 開 http://127.0.0.1:4400 ，每 3 秒更新
 ```
 
-![一輪跑到一半：第 4 輪在 D 開發，第 3 輪被 Jev 判同一招、提前的軌跡檢查回 REDIRECT](img/dashboard-live.png)
+![一輪跑到一半（模擬資料）：第 4 輪在 D 開發，第 3 輪被 Jev 判同一招、提前的軌跡檢查回 REDIRECT](img/dashboard-live.png)
 
 ## 畫面上有什麼
 
@@ -19,6 +19,13 @@ node scripts/dashboard/serve.mjs            # 開 http://127.0.0.1:4400 ，每 3
 | 停機條件 | 離 driver 的四個停機門檻還有多遠 | 由事件重算，**跟 `scripts/run-loop.sh` 同一套規則**（測試逐條對照） |
 | 點子 | ledger 裡每個點子的狀態，Jev 快速拒絕另外標示 | `LEDGER`（預設 `.claude/tasks/_idea_ledger.md`） |
 | Jev | 最近 30 次 Jev 呼叫 | `.loop/jev.jsonl`（`JEV_MODE` 不是 off 時才出現） |
+
+設計上，每個視覺元素都要多帶一點資訊：
+- **進度環**：已跑完幾輪／總輪數。
+- **軌道**：這一輪走到哪，正在做的那一段會流動。
+- **每輪上方的柱子**：輪內被拒的點子數，黃色底帶標出 plateau 的判斷視窗，看得出為什麼快停了。
+- **步驟耗時條**：哪一步最花時間。
+- **meter 上的直線**：停機門檻的位置。
 
 每個有顏色的狀態都附圖示和文字，不只靠顏色。歷程可以切成表格檢視。深淺色跟著系統，也可以手動切換（只存在瀏覽器本機）。
 
