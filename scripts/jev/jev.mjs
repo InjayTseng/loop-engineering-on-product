@@ -8,7 +8,7 @@
 // exactly as without Jev".
 //
 // Usage (prints ONE result line `JEV: <VERDICT> — <why>`; always exits 0 so it can never block a round):
-//   node scripts/jev/jev.mjs prefilter     --idea "<title + one-line mechanism>"
+//   node scripts/jev/jev.mjs prefilter     --idea "<title> — <mechanism> — <stage>" [--title "<ledger title>"]
 //   node scripts/jev/jev.mjs same-tactic   [--n 5]                     (reads git log)
 //   node scripts/jev/jev.mjs label-promise --label "<CTA label>" --observed "<what the handler did>"
 //   node scripts/jev/jev.mjs pick          --question "<q>" --option key="meaning" --option ...
@@ -27,7 +27,7 @@ import { execFileSync } from "node:child_process";
 import { appendFileSync, existsSync, mkdirSync, readFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { ledgerForPrefilter } from "./ledger.mjs";
+import { ledgerForPrefilter, titleOf } from "./ledger.mjs";
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
 const MODE = (process.env.JEV_MODE || "off").toLowerCase();
@@ -73,7 +73,7 @@ function task(name, a, { check, pick }) {
         state: {
           idea: a.idea,
           positioning: readTail(process.env.POSITIONING || "product/positioning.md", 400, 40000),
-          idea_ledger: ledgerForPrefilter(readTail(process.env.LEDGER || ".claude/tasks/_idea_ledger.md", 200, 40000)),
+          idea_ledger: ledgerForPrefilter(readTail(process.env.LEDGER || ".claude/tasks/_idea_ledger.md", 200, 40000), a.title || titleOf(a.idea)),
         },
         questions: {
           fabricated: check("Does the idea rely on fabricated signals — invented or seeded counts, fake popularity, made-up testimonials, manufactured scarcity — instead of real data?", {

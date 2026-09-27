@@ -32,7 +32,27 @@
 
 修法（`scripts/jev/ledger.mjs`）：預篩一律不把 `[IN_PROGRESS]` 行給 Jev。Step 0 已經把崩潰留下的 `[IN_PROGRESS]` 處理掉（續做或標 FAILED），所以到 Step 2b 時剩下的 `[IN_PROGRESS]` 只會是這一輪自己的想法。其他狀態（REJECTED / COMPLETED / FAILED / LOW_IMPACT）照樣保留，因為那些才是真正的重複。評估也改成把該想法的 `[IN_PROGRESS]` 行放進重播用的 ledger，跟真實一輪一致。`npm test` 有回歸測試：mock 的答案是 state 的 hash，所以「加不加自己那一行，答案完全相同」就代表那一行沒送到 Jev。
 
-教訓：離線評估要重現的是**真實一輪當下的輸入**，不只是「當時的歷史資料」。
+第二次（`cf-cutover-runbook`，p=0.90）：專案自己在 ledger 加了 `[QUEUED]` 狀態，而且是「先問 Jev、再改成 IN_PROGRESS」的順序，第一版修法只排除 `[IN_PROGRESS]`，沒擋到。現在的規則改用「是不是這個點子自己」判斷：
+- 所有 `[IN_PROGRESS]` 行一律排除。
+- 狀態不是 COMPLETED / REJECTED / FAILED / LOW_IMPACT、而且提到這個點子標題的行，也排除，不管狀態名稱叫什麼（QUEUED、TODO、SPLIT…）。
+- 已結案的同名行一律保留：以前拒絕過又被提出來，本來就是真的重複。
+
+標題取 `--idea` 裡第一個 ` — ` 之前的文字，或用 `--title` 指定。標題比對以整個 token 為單位，所以 `cf-auth` 不會誤排除 `cf-auth-hardening`。
+
+教訓：離線評估要重現的是**真實一輪當下的輸入**，不只是「當時的歷史資料」；而且各專案會自己加狀態，排除規則不能寫死某個狀態名稱。
+
+## 常見誤用：把 PASS 當成放行
+
+`JEV: PASS` 的意思是「沒有把握拒絕」，**不是**「可以做」。正確的分流：
+
+| Jev 結果 | 下一步 |
+|---|---|
+| `REJECT` | 當作價值閘拒絕 |
+| `PASS` / `ESCALATE` / `UNAVAILABLE` | **一律**交給 value-critic |
+
+如果 PASS 就直接照辦，等於讓一個只會回答是非題、而且看不到 code 的模型替你放行：它漏看的東西（例如 v2 那三條捏造數字）會直接出貨，正好違反這一頁唯一的原則。
+
+人已經拍板的 slice（遷移、既定 backlog）不必跑 Jev：它改變不了決定，只會增加誤殺的機會。Jev 要擋的是 loop 自己想出來的點子。
 
 ## 三個模式
 
@@ -62,7 +82,7 @@ mock backend 上 `eval-backlog.mjs` 會印出 20 條誤殺（最後一行是 `MO
 | 檔案 | 作用 |
 |---|---|
 | `scripts/jev/jev.mjs` | 四個任務（`prefilter` / `same-tactic` / `label-promise` / `pick`），一律 exit 0，只印一行 `JEV:`；每次呼叫寫進 `.loop/jev.jsonl` |
-| `scripts/jev/ledger.mjs` | 預篩看得到的 ledger：去掉這一輪自己的 `[IN_PROGRESS]` 行 |
+| `scripts/jev/ledger.mjs` | 預篩看得到的 ledger：去掉這個點子自己的條目（`[IN_PROGRESS]`，以及同名、還沒結案的任何狀態） |
 | `scripts/jev/eval-backlog.mjs` | 離線評估，最後一行 `JEV_EVAL:` |
 | `scripts/jev/test/jev.test.mjs` | `npm test`：用 `JEV_BACKEND=mock` + `JEV_MOCK_SCRIPT` 固定每題答案，驗證每一條分流規則 |
 | `scripts/test-driver.sh` 劇本 8–10 | driver 端：prefilter 的 SAME 會提前跑 T；shadow 就算收到 SAME 也不動；off 完全不呼叫；UNAVAILABLE 不動 |

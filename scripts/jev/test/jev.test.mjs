@@ -6,7 +6,7 @@ import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { ledgerForPrefilter } from "../ledger.mjs";
+import { ledgerForPrefilter, titleOf } from "../ledger.mjs";
 
 const JEV = resolve(dirname(fileURLToPath(import.meta.url)), "../jev.mjs");
 let fail = 0;
@@ -54,6 +54,11 @@ console.log("### ledger self-match (regression: the idea's own [IN_PROGRESS] lin
 const past = "- [COMPLETED] share chip: copy text\n- [REJECTED] streak badge — no re-entry trigger\n";
 const self = "- [IN_PROGRESS] cf-billing: reserve balance per ticket\n";
 expect("helper drops IN_PROGRESS, keeps every other status", ledgerForPrefilter(past + self), /^- \[COMPLETED\].*\n- \[REJECTED\].*\n$/);
+const q = "- [QUEUED] cf-cutover-runbook — x\n- [QUEUED] cf-auth-hardening — y\n- [REJECTED] cf-cutover-runbook — dup\n- [SPLIT] cf-cutover-runbook — parent\n";
+expect("helper drops this idea's non-terminal lines, any status name", ledgerForPrefilter(q, "cf-cutover-runbook"), /^- \[QUEUED\] cf-auth-hardening — y\n- \[REJECTED\] cf-cutover-runbook — dup\n$/);
+expect("helper keeps other ideas' QUEUED lines (whole-token title match)", ledgerForPrefilter(q, "cf-auth"), /cf-auth-hardening/);
+expect("helper never drops a terminal twin", ledgerForPrefilter(q, "cf-cutover-runbook"), /\[REJECTED\] cf-cutover-runbook/);
+expect("titleOf reads the spec's --idea shape", titleOf("cf-billing — reserve per ticket — pay"), /^cf-billing$/);
 expect("helper keeps an indented or mid-text mention", ledgerForPrefilter("- [REJECTED] was [IN_PROGRESS] once\n"), /^- \[REJECTED\]/);
 // Mock answers hash the state, so equal answers ⇔ Jev saw the same ledger.
 const dir = mkdtempSync(join(tmpdir(), "jev-ledger-"));
@@ -65,6 +70,9 @@ const answersWith = (ledgerText) => {
 };
 const base = answersWith(past);
 expect("own IN_PROGRESS line does not reach Jev", answersWith(past + self) === base ? "same" : "differs", /^same$/);
+// Regression 2 (live: cf-cutover-runbook, p=0.90): a project-local non-terminal status, checked
+// BEFORE the round flipped it to IN_PROGRESS.
+expect("own QUEUED line (title from --idea) does not reach Jev", answersWith(past + "- [QUEUED] cf-billing: reserve balance per ticket\n") === base ? "same" : "differs", /^same$/);
 expect("a REJECTED twin does reach Jev (test is sensitive)", answersWith(past + "- [REJECTED] cf-billing: reserve balance per ticket\n") === base ? "same" : "differs", /^differs$/);
 rmSync(dir, { recursive: true, force: true });
 
