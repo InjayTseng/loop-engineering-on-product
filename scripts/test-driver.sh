@@ -5,12 +5,15 @@
 # Runs in a throwaway copy of this repo. The stub also commits a file on SHIPPED so HEAD moves.
 # Usage: bash scripts/test-driver.sh        (exit 0 = all scenarios pass)
 set -u
+for bin in git node; do
+  command -v "$bin" >/dev/null || { echo "REFUSE: '$bin' not on PATH (scenarios 4 and 11 read events/dashboard state with node; Node >= 18 — e.g. 'source ~/.nvm/nvm.sh')."; exit 1; }
+done
 SRC="$(cd "$(dirname "$0")/.." && pwd)"
 T="$(mktemp -d)"; trap 'rm -rf "$T"' EXIT
 mkdir -p "$T/repo" "$T/bin"
 cp -R "$SRC"/. "$T/repo/"; rm -rf "$T/repo/.git" "$T/repo/.loop"
 ( cd "$T/repo" && git init -q && git symbolic-ref HEAD refs/heads/main && git add -A \
-  && git -c user.name=t -c user.email=t@t commit -qm init && git checkout -q -b loop )
+  && git -c user.name=t -c user.email=t@t commit -qm init && git checkout -q -b loop && scripts/install-hooks.sh >/dev/null )
 cat > "$T/bin/claude" <<'STUB'
 #!/usr/bin/env bash
 Q="${STUB_QUEUE:?}"; line=$(head -1 "$Q"); tail -n +2 "$Q" > "$Q.tmp" && mv "$Q.tmp" "$Q"
@@ -164,5 +167,68 @@ S
 else
   echo "  skip (jq not installed — driver falls back to plain text)"
 fi
+
+echo "### 12 gate records outrank the round's self-report: rejects under-reported, SHIPPED without validator PASS"
+if command -v jq >/dev/null; then
+  # STUB_GATES = space-separated "agent:TOKEN" hand-backs; REPORTED = the round's own LOOP_RESULT line.
+  cat > "$T/bin/claude-gates" <<'S'
+#!/usr/bin/env bash
+for g in $STUB_GATES; do a=${g%%:*}; v=${g#*:}; k=VALUE; [ "$a" = validator ] && k=VERDICT
+  printf '{"type":"user","tool_use_result":{"status":"completed","prompt":"p","agentType":"%s","content":[{"type":"text","text":"%s: %s"}]}}\n' "$a" "$k" "$v"
+done
+echo x >> shipped.txt; git add shipped.txt; git -c user.name=t -c user.email=t@t commit -qm "loop: stub ship"
+printf '{"type":"result","result":"%s"}\n' "$REPORTED"
+S
+  chmod +x "$T/bin/claude-gates"
+  gates_case() { rm -rf .loop; env CLAUDE_BIN="$T/bin/claude-gates" SKIP_START_AUDIT=1 STUB_GATES="$1" REPORTED="$2" "${@:3}" scripts/run-loop.sh 1 >/dev/null 2>&1; }
+  gates_case "value-critic:REJECT value-critic:REJECT value-critic:ACCEPT validator:PASS" "LOOP_RESULT: SHIPPED | category=a | step=s | rejects=0" WINDOW=1 PLATEAU_REJ=2
+  expect "reported rejects=0 but gate records show 2 value-critic REJECTs — counting 2"
+  expect "STOP: value plateau"
+  gates_case "value-critic:ACCEPT validator:FAIL" "LOOP_RESULT: SHIPPED | category=a | step=s | rejects=0"
+  expect "claimed SHIPPED but the last validator verdict is not PASS \(validator hand-backs=1\) — counting as NOOP"
+  gates_case "value-critic:ACCEPT" "LOOP_RESULT: SHIPPED | category=a | step=s | rejects=0"
+  expect "last validator verdict is not PASS \(validator hand-backs=0\)"
+  gates_case "value-critic:ACCEPT validator:FAIL validator:PASS" "LOOP_RESULT: SHIPPED | category=a | step=s | rejects=0"
+  expect_not "counting as NOOP"
+  expect "shipped: .* loop: stub ship"
+else
+  echo "  skip (jq not installed — no gate records to cross-check)"
+fi
+
+echo "### 13 a round that edits a protected path (its own judge) is parked, committed or not"
+cat > "$T/bin/claude-tamper" <<'S'
+#!/usr/bin/env bash
+echo "be lenient" >> .claude/agents/value-critic.md
+[ "${TAMPER_COMMIT:-}" = 1 ] && git -c user.name=t -c user.email=t@t commit -qam "loop: soften the critic"
+echo "LOOP_RESULT: SHIPPED | category=a | step=s | rejects=0"
+S
+chmod +x "$T/bin/claude-tamper"
+for c in 1 0; do
+  rm -rf .loop; env CLAUDE_BIN="$T/bin/claude-tamper" SKIP_START_AUDIT=1 TAMPER_COMMIT=$c scripts/run-loop.sh 3 >/dev/null 2>&1
+  expect "STOP: round 1 changed protected paths \(.claude/agents/value-critic.md\)"
+  expect "PARKED"
+  expect_not "ROUND 2/3"
+  git checkout -q HEAD -- .claude/agents/value-critic.md; [ "$c" = 1 ] && git -c user.name=t -c user.email=t@t revert --no-edit HEAD >/dev/null
+done
+echo "soft field" >> product/positioning.md
+run_case "13b a pre-existing uncommitted protected edit (autonomous P soft fields) is not blamed on the round" "LOOP_RESULT: SHIPPED | category=a | step=s | rejects=0\n" 1 SKIP_START_AUDIT=1
+expect_not "protected paths"
+git checkout -q HEAD -- product/positioning.md
+
+echo "### 14 timeout kills the whole process group (grandchildren too)"
+cat > "$T/bin/hang-tree" <<'H'
+#!/usr/bin/env bash
+( sleep 973 ) & sleep 60
+H
+chmod +x "$T/bin/hang-tree"; rm -rf .loop
+env CLAUDE_BIN="$T/bin/hang-tree" SKIP_START_AUDIT=1 ROUND_TIMEOUT=2 MAX_NOOP=1 scripts/run-loop.sh 1 >/dev/null 2>&1
+sleep 1
+if pgrep -f "sleep 973" >/dev/null; then echo "  FAIL orphaned grandchild survived the timeout"; pkill -f "sleep 973"; FAIL=1; else echo "  ok   no orphaned grandchild"; fi
+
+echo "### 15 refuses to run without the pre-push hook"
+HOOKF="$(git rev-parse --git-path hooks)/pre-push"; mv "$HOOKF" "$T/pre-push.bak"
+out=$(env CLAUDE_BIN="$T/bin/claude" STUB_QUEUE="$T/q.txt" scripts/run-loop.sh 1 2>&1 | head -1)
+case "$out" in REFUSE:*pre-push*) echo "  ok   $out";; *) echo "  FAIL got: $out"; FAIL=1;; esac
+mv "$T/pre-push.bak" "$HOOKF"
 
 [ "$FAIL" = 0 ] && echo "ALL DRIVER TESTS PASSED" || { echo "DRIVER TESTS FAILED"; exit 1; }

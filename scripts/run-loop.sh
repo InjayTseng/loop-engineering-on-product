@@ -41,7 +41,7 @@ ROOT="$(cd "$(dirname "$0")/.." && pwd)"; cd "$ROOT"
 CONFIG="${CONFIG:-loop.config.env}"
 [ -f "$CONFIG" ] || { echo "REFUSE: $CONFIG not found. Copy and fill loop.config.env first."; exit 1; }
 # Environment overrides beat the config file (documented usage: LOOP_MODEL=... scripts/run-loop.sh).
-OVERRIDABLE="ROUNDS LOOP_MODEL POSITIONING_MODEL LOOP_BRANCH DEPLOY_BRANCH WINDOW PLATEAU_REJ PLATEAU_SHIP MAX_CONSEC_REJECTED MAX_NOOP MAX_CONSEC_MAINT TRAJ_EVERY AUDIT_EVERY AUTONOMOUS_POSITIONING MAX_AUTO_POSITIONING LOOP_SPEC POSITIONING STATE ROUND_TIMEOUT JEV_MODE JEV_REJECT_P"
+OVERRIDABLE="ROUNDS LOOP_MODEL POSITIONING_MODEL LOOP_BRANCH DEPLOY_BRANCH WINDOW PLATEAU_REJ PLATEAU_SHIP MAX_CONSEC_REJECTED MAX_NOOP MAX_CONSEC_MAINT TRAJ_EVERY AUDIT_EVERY AUTONOMOUS_POSITIONING MAX_AUTO_POSITIONING LOOP_SPEC POSITIONING STATE ROUND_TIMEOUT JEV_MODE JEV_REJECT_P PROTECTED_PATHS"
 for v in $OVERRIDABLE; do eval "_env_$v=\${$v-__unset__}"; done
 # shellcheck disable=SC1090
 set -a; . "$CONFIG"; set +a
@@ -59,10 +59,14 @@ AUTONOMOUS_POSITIONING="${AUTONOMOUS_POSITIONING:-false}"; MAX_AUTO_POSITIONING=
 LOOP_SPEC="${LOOP_SPEC:-.claude/tasks/innovation_loop.md}"
 POSITIONING="${POSITIONING:-product/positioning.md}"; STATE="${STATE:-product/state.md}"
 ROUND_TIMEOUT="${ROUND_TIMEOUT:-1800}"
+# What a round may never change: its own judges, the harness, and the objective (node P owns positioning).
+PROTECTED_PATHS="${PROTECTED_PATHS:-.claude/agents .claude/commands $LOOP_SPEC scripts .github $CONFIG $POSITIONING}"
 JEV_MODE="${JEV_MODE:-off}"; JEV_REJECT_P="${JEV_REJECT_P:-0.85}"; JEV_BIN="${JEV_BIN:-$ROOT/scripts/jev/jev.mjs}"
 export JEV_MODE JEV_REJECT_P   # the round agent's own Jev calls (spec Step 2b, validator 3b) inherit the mode
 LOGDIR="$ROOT/.loop"; mkdir -p "$LOGDIR"; echo $$ > "$LOGDIR/run.pid"
-trap 'pkill -P $$ 2>/dev/null; rm -f "$LOGDIR/run.pid"' EXIT
+CUR_PG=""
+trap '[ -n "$CUR_PG" ] && kill -TERM -- "-$CUR_PG" 2>/dev/null; pkill -P $$ 2>/dev/null; rm -f "$LOGDIR/run.pid"' EXIT
+trap 'exit 143' TERM; trap 'exit 130' INT
 say() { echo "$*" | tee -a "$LOGDIR/loop.log"; }
 # shellcheck source=loop-event.sh
 . "$ROOT/scripts/loop-event.sh"; export LOOP_EVENTS="$LOGDIR/events.jsonl"   # emit (see dashboard)
@@ -82,14 +86,26 @@ verdict() {  # $1 file, $2 key → first UPPERCASE token after "KEY:" (e.g. AGRE
 STREAM=0; command -v jq >/dev/null && STREAM=1
 RUN_ID=$(date '+%Y%m%dT%H%M%S'); export LOOP_RUN_ID="$RUN_ID"   # Jev rows carry it: shadow-report joins them to gates.jsonl
 run_claude() {  # $1 log (the reply the driver parses), $2 model, $3 prompt
-  local raw="$1"; [ "$STREAM" = 1 ] && raw="${1%.log}.jsonl"
+  # Each call runs in its own process group (set -m), so a timeout — or the round simply ending —
+  # also reaps what it spawned (subagents, browsers, simulators, dev servers). stdin is /dev/null:
+  # a background process group that reads a terminal would be stopped by SIGTTIN.
+  local raw="$1" pid t=0; [ "$STREAM" = 1 ] && raw="${1%.log}.jsonl"
+  set -m
   if [ "$STREAM" = 1 ]; then
-    "$CLAUDE_BIN" -p "$3" --dangerously-skip-permissions --model "$2" --output-format stream-json --verbose >"$raw" 2>&1 & local pid=$!
+    "$CLAUDE_BIN" -p "$3" --dangerously-skip-permissions --model "$2" --output-format stream-json --verbose </dev/null >"$raw" 2>&1 &
   else
-    "$CLAUDE_BIN" -p "$3" --dangerously-skip-permissions --model "$2" >"$raw" 2>&1 & local pid=$!
+    "$CLAUDE_BIN" -p "$3" --dangerously-skip-permissions --model "$2" </dev/null >"$raw" 2>&1 &
   fi
-  ( sleep "$ROUND_TIMEOUT"; kill "$pid" 2>/dev/null && echo "TIMEOUT after ${ROUND_TIMEOUT}s" >>"$raw" ) & local wd=$!
-  wait "$pid" 2>/dev/null; kill "$wd" 2>/dev/null; wait "$wd" 2>/dev/null
+  pid=$!; set +m; CUR_PG=$pid
+  while kill -0 "$pid" 2>/dev/null; do
+    if [ "$t" -ge "$ROUND_TIMEOUT" ]; then
+      echo "TIMEOUT after ${ROUND_TIMEOUT}s" >>"$raw"; kill -TERM -- "-$pid" 2>/dev/null || kill "$pid" 2>/dev/null
+      t=0; while kill -0 "$pid" 2>/dev/null && [ "$t" -lt 5 ]; do sleep 1; t=$((t+1)); done
+      kill -KILL -- "-$pid" 2>/dev/null; break
+    fi
+    sleep 1; t=$((t+1))
+  done
+  wait "$pid" 2>/dev/null; kill -TERM -- "-$pid" 2>/dev/null; CUR_PG=""
   [ "$STREAM" = 1 ] && reply_text "$raw" >"$1"; return 0; }
 # The reply = the transcript's final `result`; for a killed round, a crash, or a plain-text
 # CLAUDE_BIN there is none, so keep every line that is not a JSON event (incl. the TIMEOUT line).
@@ -101,6 +117,29 @@ record_gates() {  # $1 log, $2 kind, $3 round, $4 outcome line, $5 commit (only 
   local n; n=$("$ROOT/scripts/gate-log.sh" "${1%.log}.jsonl" "$RUN_ID" "$2" "$3" "${4:-}" "${5:-}" 2>/dev/null)
   [ "${n:-0}" -gt 0 ] 2>/dev/null && say "    gates recorded: $n -> .loop/gates.jsonl"; return 0; }
 
+# --- what the round's own gates decided, from .loop/gates.jsonl (not from the round's self-report)
+gate_counts() {  # $1 round → "<value-critic REJECTs> <validator hand-backs> <last validator PASS 0|1> <all hand-backs>"
+  [ "$STREAM" = 1 ] && [ -f "$LOGDIR/gates.jsonl" ] || { echo "0 0 0 0"; return 0; }
+  jq -Rrn --arg run "$RUN_ID" --argjson r "$1" '
+    [inputs | fromjson? | select(.run == $run and .kind == "round" and .round == $r)] as $g
+    | ($g | map(select(.agent == "validator"))) as $v
+    | [($g | map(select(.agent == "value-critic" and .verdict.token == "REJECT")) | length),
+       ($v | length), (if ($v | last | .verdict.token) == "PASS" then 1 else 0 end), ($g | length)]
+    | map(tostring) | join(" ")' "$LOGDIR/gates.jsonl" 2>/dev/null || echo "0 0 0 0"; }
+
+# --- protected paths: a round that edits its judges, the harness or the objective is parked ----
+# Fingerprint of the working tree vs a base commit, restricted to PROTECTED_PATHS. Taken before and
+# after each round against the same base, so only the round's own edits (committed or not) count —
+# an uncommitted soft-field edit left by autonomous node P before the round is not attributed to it.
+protected_fp() {  # $1 base commit
+  # shellcheck disable=SC2086
+  { git diff "$1" -- $PROTECTED_PATHS
+    git ls-files --others --exclude-standard -z -- $PROTECTED_PATHS | xargs -0 cksum 2>/dev/null; } 2>/dev/null | cksum; }
+protected_names() {  # $1 base commit → protected files that differ from it (tracked or untracked)
+  # shellcheck disable=SC2086
+  { git diff --name-only "$1" -- $PROTECTED_PATHS; git ls-files --others --exclude-standard -- $PROTECTED_PATHS; } 2>/dev/null \
+    | sort -u | tr '\n' ' ' | sed 's/ $//'; }
+
 # --- gate 0: never on the live branch (re-run every round) ---------------------------------
 check_branch() {
   local br; br=$(git rev-parse --abbrev-ref HEAD)
@@ -108,6 +147,12 @@ check_branch() {
     say "REFUSE: on branch '$br'; the loop only runs on '$LOOP_BRANCH' ('$DEPLOY_BRANCH' = live). Aborting."; exit 1
   fi; }
 check_branch
+# The hook is a local backstop, not a boundary (`git push --no-verify` skips it): protect
+# DEPLOY_BRANCH on the remote too. Refusing here only guarantees a clone never runs without it.
+HOOK="$(git rev-parse --git-path hooks)/pre-push"
+if [ "${ALLOW_NO_HOOK:-0}" != "1" ] && { [ ! -x "$HOOK" ] || ! grep -q "refs/heads/$DEPLOY_BRANCH)" "$HOOK"; }; then
+  echo "REFUSE: no pre-push hook refusing '$DEPLOY_BRANCH' at $HOOK. Run scripts/install-hooks.sh (ALLOW_NO_HOOK=1 to override)."; exit 1
+fi
 for f in "$LOOP_SPEC" "$POSITIONING" "$STATE"; do
   [ -f "$f" ] || { echo "REFUSE: $f not found (positioning/state are inputs to every round)."; exit 1; }
 done
@@ -180,7 +225,7 @@ while [ "$i" -lt "$N" ]; do
   [ "$maint_flag" = "1" ] && note+="THIS IS A MAINTENANCE ROUND: $STATE reports BROKEN — fix what it lists, do not add features (Step 1b). "
   [ "$JEV_MODE" != "off" ] && note+="JEV_MODE=$JEV_MODE: run the Jev pre-checks (spec Step 2b; validator step 3b) — they can only fast-reject; never skip an LLM gate on a Jev pass. "
   say "--- ROUND $i/$N @ $(date '+%T') (reset=$reset_flag maint=$maint_flag) -> $log"
-  head_before=$(git rev-parse HEAD)
+  head_before=$(git rev-parse HEAD); guard_before=$(protected_fp "$head_before")
   export LOOP_ROUND="$i"; emit round_start "round#=$i" "reset#=$reset_flag" "maint#=$maint_flag"
 
   run_claude "$log" "$LOOP_MODEL" "${note}Execute exactly ONE iteration of $LOOP_SPEC in this directory (git branch '$LOOP_BRANCH'). Read loop.config.env, $POSITIONING and $STATE first. Recently shipped categories (prefer a DIFFERENT one): ${recent:-none}. Rules: one small localized change; write a PRP every round; pass the value-critic gate (before building) AND the validator gate (after building, against the PRP) — both are independent subagents, never self-approve; commit and push origin $LOOP_BRANCH ONLY, never $DEPLOY_BRANCH. End your reply with the LOOP_RESULT line exactly as the spec defines it."
@@ -195,6 +240,27 @@ while [ "$i" -lt "$N" ]; do
   fi
   moved=""; [ "$(git rev-parse HEAD)" != "$head_before" ] && moved=$(git rev-parse HEAD)
   record_gates "$log" round "$i" "$RES" "$moved"
+
+  if [ "$(protected_fp "$head_before")" != "$guard_before" ]; then
+    reason="round $i changed protected paths ($(protected_names "$head_before")) — a round may not edit its gates, the harness or positioning"
+    say "=== STOP: $reason ==="
+    emit round_end "round#=$i" "verdict=GUARD" "rejects#=$rj"; emit stop "round#=$i" "reason=$reason"
+    park_for_human "$reason"; break
+  fi
+
+  read -r g_rej g_val g_pass g_all <<EOF
+$(gate_counts "$i")
+EOF
+  if [ "$g_rej" -gt "$rj" ]; then
+    say "     reported rejects=$rj but gate records show $g_rej value-critic REJECTs — counting $g_rej"; rj=$g_rej
+  fi
+  if [ "$V" = "SHIPPED" ] && [ "$STREAM" = 1 ]; then
+    if [ "$g_all" -eq 0 ]; then
+      say "     warning: no gate hand-backs recorded for this SHIPPED round — cannot verify value-critic / validator ran"
+    elif [ "$g_val" -eq 0 ] || [ "$g_pass" -ne 1 ]; then
+      say "     claimed SHIPPED but the last validator verdict is not PASS (validator hand-backs=$g_val) — counting as NOOP"; V="NOOP"
+    fi
+  fi
 
   case "$V" in
     SHIPPED)
