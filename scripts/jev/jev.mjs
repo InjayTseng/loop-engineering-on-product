@@ -12,6 +12,7 @@
 //   node scripts/jev/jev.mjs same-tactic   [--n 5]                     (reads git log)
 //   node scripts/jev/jev.mjs label-promise --label "<CTA label>" --observed "<what the handler did>"
 //   node scripts/jev/jev.mjs pick          --question "<q>" --option key="meaning" --option ...
+//   node scripts/jev/jev.mjs claim-evidence --run <LOOP_RUN_ID> --round <N>    (reads .loop/gates.jsonl)
 //
 // Env: JEV_MODE off|shadow|prefilter (default off) · JEV_REJECT_P (0.85) · JEV_TIMEOUT_MS (15000)
 //      backend: TYPESAFE_API_KEY | OPENROUTER_API_KEY | AI_GATEWAY_API_KEY | JEV_BACKEND=mock
@@ -140,8 +141,58 @@ function task(name, a, { check, pick }) {
           : [`PICK ${ans.best.answer}`, `conf=${ans.best.confidence.toFixed(2)}; still send the pick to value-critic`],
       };
     }
+    case "claim-evidence": {
+      // Is the validator's PASS backed by what it actually ran? Evidence = the validator's own tool calls
+      // and outputs from .loop/gates.jsonl (scripts/gate-log.sh), never its summary: judging the wording
+      // alone is what doesn't work (jev-belay: AUROC 0.50 on wording vs 0.976 with the run log).
+      const run = a.run || process.env.LOOP_RUN_ID, round = Number(a.round || process.env.LOOP_ROUND);
+      if (!run || !round) out("ESCALATE", "need --run and --round");
+      const agent = process.env.GATE_VALIDATOR_AGENT || "validator";
+      const gatesPath = process.env.GATES || join(ROOT, ".loop", "gates.jsonl");
+      const recs = existsSync(gatesPath) ? readFileSync(gatesPath, "utf8").split("\n").flatMap((l) => {
+        try { const r = l.trim() && JSON.parse(l); return r && r.run === run && r.round === round && r.kind === "round" && r.agent === agent ? [r] : []; }
+        catch { return []; } }) : [];
+      const rec = recs.at(-1);
+      if (!rec) return { pre: ["ESCALATE", `no ${agent} record for ${run}/round ${round}; nothing to check`] };
+      const claim = (rec.report || "").replace(/`/g, "").match(/^\s*CLAIM:\s*(.+)$/m)?.[1]?.trim();
+      if (!claim) return { pre: ["ESCALATE", `the ${agent} report has no CLAIM: line`] };
+      const ev = rec.evidence || [];
+      // Deterministic first (regex before model, as in jev-belay): did the correctness gate run at all?
+      const buildTok = String(process.env.BUILD_CMD || "").split(/\s+/).filter(Boolean).sort((x, y) => y.length - x.length)[0];
+      if (buildTok && !ev.some((e) => String(e.input || "").includes(buildTok)))
+        return { pre: ["UNSUPPORTED", `the ${agent} never ran BUILD_CMD (${buildTok}) before its PASS; re-validate`] };
+      // Only a file READ of an image counts as "looked at a screenshot" — BUILD_CMD itself names the
+      // screenshot path it writes, and that is not a look.
+      const images = ev.filter((e) => /^(Read|View|view_image)$/i.test(String(e.tool || "")) && /\.(png|jpe?g|webp|gif)\b/i.test(String(e.input || "")))
+        .map((e) => String(e.input).slice(0, 200));
+      const budget = 20000; const kept = [];
+      for (let i = ev.length - 1, used = 0; i >= 0 && used < budget; i--) {   // newest first, then restore order
+        const e = { tool: ev[i].tool, input: String(ev[i].input || "").slice(0, 300), output: String(ev[i].output || "").slice(0, 1500) };
+        kept.unshift(e); used += e.input.length + e.output.length;
+      }
+      return {
+        state: { claim, evidence: kept, images_viewed: images },
+        questions: {
+          observed: check("Does a tool output in `evidence` show the behavior stated in `claim` actually happening — for example command output, page text, or a test result that shows it?", {
+            true: "an output in evidence shows the claimed behavior itself",
+            false: "no output shows it; at most something is said about it, or only an image file path appears (a path shows nothing)",
+          }),
+          contradicted: check("Does any tool output in `evidence` show behavior that contradicts `claim`?", {
+            true: "an output shows the claimed element missing, a different behavior, or an error where the claim promises something works",
+            false: "no output contradicts the claim",
+          }),
+        },
+        decide: (ans) => {
+          if (yes(ans.contradicted)) return ["CONTRADICTED", `p=${ans.contradicted.answer.toFixed(2)}; the ${agent}'s own evidence contradicts its CLAIM; re-validate`];
+          if (no(ans.observed)) return images.length
+            ? ["ESCALATE", `no text evidence for the CLAIM, but ${images.length} image(s) were viewed and Jev cannot see images`]
+            : ["UNSUPPORTED", `P(observed)=${ans.observed.answer.toFixed(2)}; nothing the ${agent} ran shows the CLAIM; re-validate`];
+          return passOrEscalate(ans, "the CLAIM is backed by the validator's evidence, or Jev cannot tell; nothing to do");
+        },
+      };
+    }
     default:
-      out("ESCALATE", `unknown task '${name}' (prefilter | same-tactic | label-promise | pick)`);
+      out("ESCALATE", `unknown task '${name}' (prefilter | same-tactic | label-promise | pick | claim-evidence)`);
   }
 }
 
@@ -165,14 +216,15 @@ try {
 
 const t = task(name, a, lib);
 let result;
-try {
+if (t.pre) result = { answers: {}, backend: "code", latencyMs: 0 };   // decided without asking Jev
+else try {
   result = await Promise.race([
     jev.judge(t.state, t.questions),
     new Promise((_, rej) => setTimeout(() => rej(new Error(`timeout after ${TIMEOUT_MS}ms`)), TIMEOUT_MS)),
   ]);
 } catch (e) { out("UNAVAILABLE", `${e.message}; run the LLM gate as usual`); }
 
-const [verdict, why] = t.decide(result.answers);
+const [verdict, why] = t.pre || t.decide(result.answers);
 try {
   mkdirSync(join(ROOT, ".loop"), { recursive: true });
   appendFileSync(join(ROOT, ".loop", "jev.jsonl"), JSON.stringify({

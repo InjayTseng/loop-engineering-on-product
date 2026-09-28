@@ -158,15 +158,15 @@ export function stopMeters(events, cfg) {
 // What is happening right now: a gate the driver is running, or a step inside the open round.
 export function currentActivity(events, running) {
   if (!running) return null;
-  const open = { audit_start: "audit", traj_start: "traj", position_start: "position" };
+  const open = { audit_start: "audit", traj_start: "traj", position_start: "position", reval_start: "reval" };
   for (let i = events.length - 1; i >= 0; i--) {
     const e = events[i];
     if (open[e.type]) {
       const closed = events.slice(i + 1).some((x) => x.type === open[e.type]);
-      if (!closed) return { kind: "gate", node: { audit_start: "C", traj_start: "T", position_start: "P" }[e.type],
-        label: { audit_start: "Deep state audit (state-auditor)", traj_start: "Trajectory check (trajectory-monitor)", position_start: "Autonomous positioning (strategist + critic)" }[e.type] + (e.why ? `: ${e.why}` : ""),
+      if (!closed) return { kind: "gate", node: { audit_start: "C", traj_start: "T", position_start: "P", reval_start: "V" }[e.type],
+        label: { audit_start: "Deep state audit (state-auditor)", traj_start: "Trajectory check (trajectory-monitor)", position_start: "Autonomous positioning (strategist + critic)", reval_start: "Re-validation (Jev: the validator's PASS lacks evidence)" }[e.type] + (e.why ? `: ${e.why}` : ""),
         round: e.round, since: e.ts };
-      return null;
+      continue;   // a finished gate: keep looking (a re-validation ends inside a still-open round)
     }
     if (e.type === "round_start") {
       const ended = events.slice(i + 1).some((x) => x.type === "round_end" && x.round === e.round);

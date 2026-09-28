@@ -253,4 +253,41 @@ out=$(env CLAUDE_BIN="$T/bin/claude" STUB_QUEUE="$T/q.txt" scripts/run-loop.sh 1
 case "$out" in REFUSE:*pre-push*) echo "  ok   $out";; *) echo "  FAIL got: $out"; FAIL=1;; esac
 mv "$T/pre-push.bak" "$HOOKF"
 
+echo "### 16 JEV claim-evidence: prefilter UNSUPPORTED → fresh re-validation decides; shadow never re-validates"
+if command -v jq >/dev/null; then
+  # The round emits a value-critic ACCEPT and a validator PASS (with a CLAIM) and commits; a re-validation
+  # call (recognised by its prompt) only prints VERDICT: $REVAL. JEV_BIN is the queue stub from scenario 8.
+  cat > "$T/bin/claude-claim" <<'S'
+#!/usr/bin/env bash
+case "$*" in *"independently and from scratch"*) printf '{"type":"result","result":"VERDICT: %s"}\n' "$REVAL"; exit 0;; esac
+printf '{"type":"user","tool_use_result":{"status":"completed","prompt":"p","agentType":"value-critic","content":[{"type":"text","text":"VALUE: ACCEPT"}]}}\n'
+printf '{"type":"user","tool_use_result":{"status":"completed","prompt":"p","agentType":"validator","content":[{"type":"text","text":"VERDICT: PASS\\nCLAIM: the button scrolls"}]}}\n'
+echo x >> shipped.txt; git add shipped.txt; git -c user.name=t -c user.email=t@t commit -qm "loop: stub ship"
+printf '{"type":"result","result":"LOOP_RESULT: SHIPPED | category=a | step=s | rejects=0"}\n'
+S
+  chmod +x "$T/bin/claude-claim"
+  claim_case() { printf '%b' "$1" > "$T/jq.txt"; : > "$T/jcalls.txt"; rm -rf .loop
+    env CLAUDE_BIN="$T/bin/claude-claim" JEV_BIN="$T/bin/jev" JEV_QUEUE="$T/jq.txt" JEV_CALLS="$T/jcalls.txt" SKIP_START_AUDIT=1 "${@:2}" scripts/run-loop.sh 1 >/dev/null 2>&1; }
+  claim_case "JEV: UNSUPPORTED — nothing the validator ran shows the CLAIM\nJEV: DISTINCT\n" JEV_MODE=prefilter REVAL=FAIL
+  expect "jev claim-evidence: JEV: UNSUPPORTED"
+  expect "re-validation @ round 1"
+  expect "re-validation did not PASS — counting as NOOP"
+  expect_not "shipped: "
+  grep -q 'claim-evidence --run .* --round 1' "$T/jcalls.txt" && echo "  ok   Jev asked with this run and round" || { echo "  FAIL claim-evidence args"; FAIL=1; }
+  [ -s .loop/reval-001.log ] && echo "  ok   re-validation log kept" || { echo "  FAIL reval log"; FAIL=1; }
+  claim_case "JEV: CONTRADICTED — p=0.91\nJEV: DISTINCT\n" JEV_MODE=prefilter REVAL=PASS
+  expect "re-validation @ round 1"
+  expect_not "counting as NOOP"
+  expect "shipped: .* loop: stub ship"
+  claim_case "JEV: SHADOW — would=UNSUPPORTED\nJEV: DISTINCT\n" JEV_MODE=shadow REVAL=FAIL
+  expect "jev claim-evidence: JEV: SHADOW"
+  expect_not "re-validation"
+  expect "shipped: .* loop: stub ship"
+  claim_case "JEV: PASS — backed\nJEV: DISTINCT\n" JEV_MODE=prefilter REVAL=FAIL
+  expect_not "re-validation"
+  expect "shipped: .* loop: stub ship"
+else
+  echo "  skip (jq not installed — no gate records, so no claim-evidence check)"
+fi
+
 [ "$FAIL" = 0 ] && echo "ALL DRIVER TESTS PASSED" || { echo "DRIVER TESTS FAILED"; exit 1; }

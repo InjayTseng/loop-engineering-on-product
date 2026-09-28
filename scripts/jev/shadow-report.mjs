@@ -14,6 +14,11 @@
 //   safety   Jev would REJECT but value-critic ACCEPTed → a false reject (prefilter would lose that idea)
 //   savings  of value-critic's REJECTs, how many Jev would have fast-rejected (a value-critic call saved)
 //
+// claim-evidence (the validator's PASS vs its own tool outputs) is reported too. Its ground truth is the
+// fresh re-validation the driver runs in prefilter mode (a `reval` record in gates.jsonl): a re-validation
+// FAIL confirms the flag, a PASS makes it a false flag. Shadow flags have no re-validation and are
+// listed for a human to label. Summary line: JEV_CLAIM: checked=… flagged=… confirmed=… false_flags=… unlabeled=…
+//
 // Usage: node scripts/jev/shadow-report.mjs [--jev .loop/jev.jsonl] [--gates .loop/gates.jsonl]
 // Last line: JEV_SHADOW: SAFE | UNSAFE | NO_DATA — pairs=N false_rejects=F caught=C/R
 //   SAFE = at least one pair and zero false rejects. Agreement with value-critic is not ground
@@ -65,6 +70,24 @@ console.log("");
 console.log(`safety:  ${falseRejects.length} false reject(s) out of ${wouldReject} would-REJECT`);
 console.log(`savings: Jev would have caught ${caught} of ${llmRejects} value-critic REJECTs`);
 for (const p of falseRejects) console.log(`  FALSE REJECT ${p.key}: ${p.idea}\n    jev: ${p.why}\n    value-critic: ACCEPT ${p.scores}`);
+
+// --- claim-evidence -----------------------------------------------------------------------------------
+const VALIDATOR = process.env.GATE_VALIDATOR_AGENT || "validator";
+const claimRows = rows(JEV).filter((r) => r.task === "claim-evidence" && r.run && r.input?.round != null);
+const revals = group(rows(GATES).filter((r) => r.kind === "reval" && r.agent === VALIDATOR), (r) => `${r.run}/${r.round}`);
+const flagged = claimRows.filter((r) => ["UNSUPPORTED", "CONTRADICTED"].includes(r.verdict));
+const labelled = flagged.map((r) => ({ r, key: `${r.run}/${Number(r.input.round)}`, reval: revals.get(`${r.run}/${Number(r.input.round)}`)?.at(-1)?.verdict?.token ?? null }));
+const confirmed = labelled.filter((x) => x.reval && x.reval !== "PASS");
+const falseFlags = labelled.filter((x) => x.reval === "PASS");
+const unlabeled = labelled.filter((x) => !x.reval);
+if (claimRows.length) {
+  console.log("");
+  console.log(`claim-evidence: checked ${claimRows.length}   flagged ${flagged.length}   escalated ${claimRows.filter((r) => r.verdict === "ESCALATE").length}`);
+  console.log(`  re-validation confirmed ${confirmed.length}   false flags ${falseFlags.length}   unlabeled (shadow: label by hand) ${unlabeled.length}`);
+  for (const x of falseFlags) console.log(`  FALSE FLAG ${x.key}: ${x.r.why}`);
+  for (const x of unlabeled) console.log(`  TO LABEL ${x.key}: ${x.r.verdict} — ${x.r.why}`);
+}
+console.log(`JEV_CLAIM: checked=${claimRows.length} flagged=${flagged.length} confirmed=${confirmed.length} false_flags=${falseFlags.length} unlabeled=${unlabeled.length}`);
 
 const verdict = pairs.length === 0 ? "NO_DATA" : falseRejects.length ? "UNSAFE" : "SAFE";
 console.log(`JEV_SHADOW: ${verdict} — pairs=${pairs.length} false_rejects=${falseRejects.length} caught=${caught}/${llmRejects}`);
