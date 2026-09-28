@@ -53,6 +53,7 @@ expect_not "no LOOP_RESULT"
 run_case "2 RESET then rejected → auto P AGREED → resume → TRAJ STOP → P DISAGREE → parked" \
 "AUDIT: HEALTHY\nLOOP_RESULT: REJECTED | rejects=3\nLOOP_RESULT: REJECTED | rejects=3\nPOSITION: AGREED\nAUDIT: GAPS\nLOOP_RESULT: SHIPPED | category=x | step=s | rejects=0\nLOOP_RESULT: SHIPPED | category=y | step=s | rejects=0\nAUDIT: HEALTHY\nTRAJ: STOP — same tactic relabeled\nPOSITION: DISAGREED — evidence does not support\n" 10 AUTONOMOUS_POSITIONING=true MAX_AUTO_POSITIONING=2
 expect "next round forced RESET"
+grep -q 'RESET ROUND' .loop/round-002.log && echo "  ok   value-gate reset → generic RESET note in round 2" || { echo "  FAIL generic RESET note"; FAIL=1; }
 expect "STOP: value plateau — a RESET round was also fully rejected \(round 2\)"
 expect "positioning re-aimed"
 expect "STOP: trajectory monitor halted the run \(round 4\)"
@@ -65,10 +66,11 @@ expect "state BROKEN — next round forced MAINTENANCE"
 expect "STOP: 3 consecutive build/validate failures"
 grep -q 'MAINTENANCE ROUND' .loop/round-001.log && echo "  ok   maintenance note in round 1 prompt" || { echo "  FAIL maintenance note"; FAIL=1; }
 
-run_case "4 healthy rounds; TRAJ REDIRECT → next round RESET; recent categories fed forward" \
-"AUDIT: HEALTHY\nLOOP_RESULT: SHIPPED | category=a | step=s | rejects=0\nLOOP_RESULT: SHIPPED | category=b | step=s | rejects=1\nAUDIT: HEALTHY\nTRAJ: REDIRECT\nLOOP_RESULT: SHIPPED | category=c | step=s | rejects=0\n" 3
+run_case "4 healthy rounds; TRAJ REDIRECT → next round is told where to go; recent categories fed forward" \
+"AUDIT: HEALTHY\nLOOP_RESULT: SHIPPED | category=a | step=s | rejects=0\nLOOP_RESULT: SHIPPED | category=b | step=s | rejects=1\nAUDIT: HEALTHY\nTRAJ: REDIRECT — go to first-run: two rounds ignored it\nLOOP_RESULT: SHIPPED | category=c | step=s | rejects=0\n" 3
 expect_not "STOP"
-grep -q 'RESET ROUND' .loop/round-003.log && echo "  ok   RESET note in round 3 prompt" || { echo "  FAIL RESET note"; FAIL=1; }
+grep -q 'REDIRECT ROUND.*TRAJ: REDIRECT — go to first-run: two rounds ignored it' .loop/round-003.log && echo "  ok   round 3 prompt carries the monitor's REDIRECT line" || { echo "  FAIL REDIRECT note"; FAIL=1; }
+grep -q 'RESET ROUND' .loop/round-003.log && { echo "  FAIL a REDIRECT round was given the generic 'pick something different' note"; FAIL=1; } || echo "  ok   no generic RESET note on a REDIRECT round"
 grep -q 'Recently shipped categories (prefer a DIFFERENT one): a b' .loop/round-003.log && echo "  ok   recent categories = 'a b'" || { echo "  FAIL recent categories"; FAIL=1; }
 # structured events for the dashboard: every line is JSON; run/round/gate/step events all present
 ev=$(node -e '
@@ -83,6 +85,11 @@ db=$(node --input-type=module -e '
   const s = buildState(process.cwd());
   console.log([s.run.status, s.rounds.map(r => r.verdict).join(","), s.rounds[2].steps[0]?.node, s.rounds[1].gates.map(g => g.verdict).join(","), s.current].join(" "));' 2>&1)
 [ "$db" = "done SHIPPED,SHIPPED,SHIPPED V HEALTHY,REDIRECT " ] && echo "  ok   dashboard state from a real driver run: $db" || { echo "  FAIL dashboard state: $db"; FAIL=1; }
+
+run_case "4b a REDIRECT steers exactly one round" \
+"AUDIT: HEALTHY\nLOOP_RESULT: SHIPPED | category=a | step=s | rejects=0\nLOOP_RESULT: SHIPPED | category=b | step=s | rejects=0\nAUDIT: HEALTHY\nTRAJ: REDIRECT — go to first-run\nLOOP_RESULT: SHIPPED | category=c | step=s | rejects=0\nLOOP_RESULT: SHIPPED | category=d | step=s | rejects=0\nAUDIT: HEALTHY\nTRAJ: CONTINUE\n" 4
+grep -q 'REDIRECT ROUND.*go to first-run' .loop/round-003.log && echo "  ok   round 3 follows the REDIRECT" || { echo "  FAIL round 3 REDIRECT"; FAIL=1; }
+grep -qE 'REDIRECT ROUND|RESET ROUND' .loop/round-004.log && { echo "  FAIL round 4 still carries a REDIRECT/RESET note"; FAIL=1; } || echo "  ok   round 4 is back to normal"
 
 run_case "5 SHIPPED claimed but HEAD unchanged → NOOP; 3 maintenance ships → stop" \
 "AUDIT: HEALTHY\nLOOP_RESULT: SHIPPED | category=maintenance | step=none | rejects=0\nLOOP_RESULT: SHIPPED | category=maintenance | step=none | rejects=0\nAUDIT: HEALTHY\nTRAJ: CONTINUE\nLOOP_RESULT: SHIPPED | category=maintenance | step=none | rejects=0\n" 10
@@ -126,7 +133,7 @@ expect "jev same-tactic: JEV: SAME"
 expect "trajectory check @ round 1 \(early: Jev flagged a repeated tactic\)"
 expect "trajectory check @ round 2$"
 expect "jev=prefilter"
-grep -q 'RESET ROUND' .loop/round-002.log && echo "  ok   RESET note in round 2 prompt" || { echo "  FAIL RESET note after early REDIRECT"; FAIL=1; }
+grep -q 'REDIRECT ROUND.*same nudge again' .loop/round-002.log && echo "  ok   REDIRECT note (with the monitor's reason) in round 2 prompt" || { echo "  FAIL REDIRECT note after early REDIRECT"; FAIL=1; }
 grep -q 'JEV_MODE=prefilter: run the Jev pre-checks' .loop/round-001.log && echo "  ok   Jev note in round prompt" || { echo "  FAIL Jev note"; FAIL=1; }
 
 jev_case "9 JEV shadow: even a SAME line never triggers anything" \

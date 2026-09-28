@@ -29,7 +29,7 @@ Each node answers six questions: input artifacts, output artifacts, who does it,
 | D | Develop | PRD | one small, localized change on an isolated branch | builder (`/execute-prp`) | Correctness gate: the adapter's `BUILD_CMD` exits 0 (`BUILD: ok \| fail`) | fail → fix ≤3 times → revert, `NOOP` | Fast inner loop |
 | V | Validate PRD | PRD (CLAIM + success criteria) + changed files + observation of the product | a `VERDICT` block written back to the backlog | `validator` (independent) | Adversarially verifies the CLAIM holds, labels match behavior, no regressions (`VERDICT: PASS \| PARTIAL \| FAIL`) | Implementation issue → D; the CLAIM itself unobservable or contradictory → S; more than 3 tries on one slice → revert, `NOOP` | Fast inner loop |
 | Y | Deploy | the PASSed change | commit + push `LOOP_BRANCH`; ledger/backlog marked COMPLETED; one `LOOP_RESULT` line | the round agent runs fixed git commands from the spec (the driver never pushes; a `pre-push` hook blocks the live branch) | Branch isolation: never touches `DEPLOY_BRANCH`; a human merges to live | — → back to C for the next round | Every round |
-| T | Trajectory | last N commits + positioning | — | `trajectory-monitor` (independent) | `TRAJ: CONTINUE \| REDIRECT \| STOP` | REDIRECT → next round is a RESET; STOP → hand to P | Every N rounds |
+| T | Trajectory | last N commits + positioning | — | `trajectory-monitor` (independent) | `TRAJ: CONTINUE \| REDIRECT \| STOP` | REDIRECT → its whole line goes into the next round's prompt as the direction to take; STOP → hand to P | Every N rounds |
 
 "Test or validate the PRD" is split into two layers. `BUILD_CMD` after D tests that *the product is not broken* (deterministic). V tests that *the product delivers what the PRD promised* (latent, independent, checked against the PRD file). Drop either layer and things slip through: in the v2 run a button labeled "draw a fortune" only scrolled the page, the build was green, the validator passed it, and only a human looking afterwards caught it (lesson 9). It is also why every round needs a PRD: without one, V has nothing to verify against and degrades to "it runs".
 
@@ -67,7 +67,7 @@ flowchart LR
   Y --> C
   Y -. every N .-> T
   T -- CONTINUE --> C
-  T -- REDIRECT reset --> C
+  T -- REDIRECT: go here --> C
   T -- STOP / plateau --> P
   H -- /position multi-round --> P
   A2 -- overnight, both agree --> P

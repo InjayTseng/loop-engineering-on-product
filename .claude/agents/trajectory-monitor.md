@@ -24,5 +24,7 @@ Reply with ONE line, then a half-sentence of reasoning:
 TRAJ: CONTINUE | REDIRECT | STOP — <why>
 ```
 
-REDIRECT = the driver forces the next round to a different funnel angle. STOP = the run should
+REDIRECT = the driver passes this whole line, verbatim, into the next round's prompt as the direction
+to take. So name the target, not just the problem: `TRAJ: REDIRECT — go to <stage / angle>: <why>`
+(e.g. "go to first-run: the last three rounds all polished share"). STOP = the run should
 end (plateau, or the loop is optimizing something other than the north star).

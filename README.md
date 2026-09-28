@@ -66,7 +66,7 @@ flowchart TB
   STOP -. every N .-> T
   STOP -. every K .-> K
   T -- CONTINUE --> C
-  T -- "REDIRECT (next round RESET)" --> C
+  T -- "REDIRECT (next round goes where it says)" --> C
   T -- STOP --> P
   K -- HEALTHY / GAPS --> C
   K -- "BROKEN (next round: fix only)" --> C

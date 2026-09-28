@@ -186,7 +186,7 @@ run_autonomous_positioning() {   # returns 0 if positioning changed (continue), 
   return 1; }
 
 # --- node T: independent trajectory check -------------------------------------------------
-run_traj() {   # $1 round, $2 why → sets STOP / reset_flag from the TRAJ line
+run_traj() {   # $1 round, $2 why → sets STOP / reset_flag / redirect_line from the TRAJ line
   local tlog="$LOGDIR/traj-$(pad "$1").log"
   say "  · trajectory check @ round $1${2:+ ($2)}"; emit traj_start "round#=$1" "why=$2"
   run_claude "$tlog" "$LOOP_MODEL" "Spawn the trajectory-monitor subagent (.claude/agents/trajectory-monitor.md) over the last $TRAJ_EVERY commits, judged against $POSITIONING. Report its TRAJ: line verbatim as your last line."
@@ -195,7 +195,9 @@ run_traj() {   # $1 round, $2 why → sets STOP / reset_flag from the TRAJ line
   record_gates "$tlog" traj "$1" "$T"
   case "$(verdict "$tlog" TRAJ)" in
     STOP)     STOP="trajectory monitor halted the run (round $1)" ;;
-    REDIRECT) reset_flag=1 ;;
+    # Keep the whole line: a REDIRECT names where to go, and the next round must see it — a bare
+    # "pick something different" lets the round wander anywhere but there.
+    REDIRECT) reset_flag=1; redirect_line=$(printf '%s' "$T" | cut -c1-600) ;;
   esac; return 0; }
 
 # --- Jev same-tactic pre-check (optional, docs/09-jev.md) -----------------------------------
@@ -237,7 +239,7 @@ revalidate() {   # $1 round → 0 when a fresh validator returns PASS
 park_for_human() { echo "WAITING_FOR_P: $1" > "$LOGDIR/state"; emit park "reason=$1"; say "=== PARKED: $1 — positioning needs a human (/position). State is in $LOGDIR/state. ==="; }
 
 START=$(git rev-parse HEAD)
-consec_reject=0; consec_noop=0; consec_maint=0; reset_flag=0
+consec_reject=0; consec_noop=0; consec_maint=0; reset_flag=0; redirect_line=""
 REJWIN=(); SHIPWIN=(); CATS=()
 rm -f "$LOGDIR/state"
 say "=== run-loop v3 START $(date '+%F %T') | N=$N model=$LOOP_MODEL branch=$LOOP_BRANCH window=$WINDOW plateau=${PLATEAU_REJ}/${PLATEAU_SHIP} audit_every=$AUDIT_EVERY traj_every=$TRAJ_EVERY auto_pos=$AUTONOMOUS_POSITIONING timeout=${ROUND_TIMEOUT}s jev=$JEV_MODE ==="
@@ -253,7 +255,12 @@ while [ "$i" -lt "$N" ]; do
   log="$LOGDIR/round-$(pad "$i").log"
   n=${#CATS[@]}; s=$(( n > 4 ? n - 4 : 0 )); recent="${CATS[*]:$s}"   # last 4, bash-3.2-safe
   note=""
-  [ "$reset_flag" = "1" ] && note+="THIS IS A RESET ROUND: the value gate rejected recent ideas — deliberately pick a DIFFERENT funnel stage / category from the recent ones and think from scratch. "
+  # Two different instructions: a TRAJ REDIRECT says where to go; a value-gate RESET says "not here".
+  if [ -n "$redirect_line" ]; then
+    note+="THIS IS A REDIRECT ROUND: the independent trajectory monitor reviewed the recent rounds and said: \"$redirect_line\". Work in the direction it names (the stage, angle or mechanism it points to) — not merely somewhere different. Value-critic still judges the idea as usual. "
+  elif [ "$reset_flag" = "1" ]; then
+    note+="THIS IS A RESET ROUND: the value gate rejected recent ideas — deliberately pick a DIFFERENT funnel stage / category from the recent ones and think from scratch. "
+  fi
   [ "$maint_flag" = "1" ] && note+="THIS IS A MAINTENANCE ROUND: $STATE reports BROKEN — fix what it lists, do not add features (Step 1b). "
   [ "$JEV_MODE" != "off" ] && note+="JEV_MODE=$JEV_MODE: run the Jev pre-checks (spec Step 2b; validator step 3b; retry check Step 7b) — they can only fast-reject or cost one extra retry; never skip an LLM gate on a Jev pass. "
   say "--- ROUND $i/$N @ $(date '+%T') (reset=$reset_flag maint=$maint_flag) -> $log"
@@ -261,7 +268,7 @@ while [ "$i" -lt "$N" ]; do
   export LOOP_ROUND="$i"; emit round_start "round#=$i" "reset#=$reset_flag" "maint#=$maint_flag"
 
   run_claude "$log" "$LOOP_MODEL" "${note}Execute exactly ONE iteration of $LOOP_SPEC in this directory (git branch '$LOOP_BRANCH'). Read loop.config.env, $POSITIONING and $STATE first. Recently shipped categories (prefer a DIFFERENT one): ${recent:-none}. Rules: one small localized change; write a PRP every round; pass the value-critic gate (before building) AND the validator gate (after building, against the PRP) — both are independent subagents, never self-approve; commit and push origin $LOOP_BRANCH ONLY, never $DEPLOY_BRANCH. End your reply with the LOOP_RESULT line exactly as the spec defines it."
-  maint_flag=0
+  maint_flag=0; redirect_line=""   # a redirect steers one round; later rounds follow the gates again
 
   RES=$(resline "$log" LOOP_RESULT); V=$(verdict "$log" LOOP_RESULT)
   say "  -> ${RES:-<no LOOP_RESULT emitted>}"
