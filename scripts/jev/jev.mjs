@@ -177,6 +177,8 @@ try {
   mkdirSync(join(ROOT, ".loop"), { recursive: true });
   appendFileSync(join(ROOT, ".loop", "jev.jsonl"), JSON.stringify({
     ts: new Date().toISOString(), task: name, mode: MODE, verdict, why, input: a,
+    // the driver exports these; they join a shadow row to its round in .loop/gates.jsonl (shadow-report.mjs)
+    run: process.env.LOOP_RUN_ID || null, round: process.env.LOOP_ROUND ? Number(process.env.LOOP_ROUND) : null,
     backend: result.backend, latencyMs: result.latencyMs,
     answers: Object.fromEntries(Object.entries(result.answers).map(([k, v]) => [k, { answer: v.answer, confidence: v.confidence, escalate: v.escalate, reason: v.reason }])),
   }) + "\n");

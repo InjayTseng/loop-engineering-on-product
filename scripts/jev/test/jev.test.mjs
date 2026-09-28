@@ -87,5 +87,33 @@ expect("repeat → SAME", run(["same-tactic", "--n", "3"], script({ same_tactic:
 expect("different → DISTINCT", run(["same-tactic"], script({ same_tactic: { answer: 0.1 } }), repo), /^JEV: DISTINCT/);
 rmSync(repo, { recursive: true, force: true });
 
+console.log("### shadow-report (pairs shadow prefilter rows with value-critic verdicts)");
+run(idea, { JEV_MODE: "shadow", LOOP_RUN_ID: "R-test", LOOP_ROUND: "7", ...script(low) });
+const last = JSON.parse(readFileSync(LOG, "utf8").trim().split("\n").pop());
+expect("jev.mjs tags its row with the driver's run and round", `${last.run}/${last.round}`, /^R-test\/7$/);
+
+const REPORT = resolve(dirname(JEV), "shadow-report.mjs");
+const rep = mkdtempSync(join(tmpdir(), "jev-report-"));
+const jl = (rows) => rows.map((r) => JSON.stringify(r)).join("\n") + "\n";
+const sh = (round, verdict, ideaText) => ({ task: "prefilter", mode: "shadow", run: "R1", round, verdict, why: `${verdict} why`, input: { idea: ideaText } });
+const vc = (round, token) => ({ agent: "value-critic", kind: "round", run: "R1", round, verdict: { key: "VALUE", token }, report: `SCORES: impact=4\nVALUE: ${token}` });
+const report = (jevRows, gateRows) => {
+  writeFileSync(join(rep, "jev.jsonl"), jl(jevRows)); writeFileSync(join(rep, "gates.jsonl"), jl(gateRows));
+  return execFileSync("node", [REPORT, "--jev", join(rep, "jev.jsonl"), "--gates", join(rep, "gates.jsonl")], { encoding: "utf8" });
+};
+const lastLine = (s) => s.trim().split("\n").pop();
+// round 1: two ideas, in order; round 2: Jev rejects one value-critic accepted; round 3: counts differ
+const safeOut = report([sh(1, "REJECT", "fake counter"), sh(1, "PASS", "share chip")], [vc(1, "REJECT"), vc(1, "ACCEPT")]);
+expect("agreeing reject + pass → SAFE, 1 of 1 rejects caught", lastLine(safeOut), /^JEV_SHADOW: SAFE — pairs=2 false_rejects=0 caught=1\/1$/);
+const unsafeOut = report([sh(1, "REJECT", "fake counter"), sh(2, "REJECT", "good idea")], [vc(1, "REJECT"), vc(2, "ACCEPT")]);
+expect("a would-REJECT that value-critic accepted → UNSAFE", lastLine(unsafeOut), /^JEV_SHADOW: UNSAFE — pairs=2 false_rejects=1 caught=1\/1$/);
+expect("the false reject is listed with its idea", unsafeOut, /FALSE REJECT R1\/2: good idea/);
+const mixed = report([sh(3, "PASS", "a"), sh(3, "PASS", "b")], [vc(3, "ACCEPT")]);
+expect("a round whose counts differ is left unpaired, not guessed", mixed, /unpaired rounds: 1 — R1\/3 \(jev=2 value-critic=1\)/);
+expect("no pairs → NO_DATA", lastLine(mixed), /^JEV_SHADOW: NO_DATA/);
+const prefilterRow = { ...sh(4, "REJECT", "x"), mode: "prefilter" };
+expect("prefilter-mode rows are ignored (value-critic never saw a fast-rejected idea)", lastLine(report([prefilterRow], [])), /^JEV_SHADOW: NO_DATA/);
+rmSync(rep, { recursive: true, force: true });
+
 console.log(fail ? "JEV TESTS FAILED" : "ALL JEV TESTS PASSED");
 process.exit(fail);

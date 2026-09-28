@@ -80,7 +80,7 @@ verdict() {  # $1 file, $2 key → first UPPERCASE token after "KEY:" (e.g. AGRE
 # With jq, capture the full stream-json transcript (subagent reports + their tool calls) so the gate
 # decisions can be recorded; without it, fall back to plain text — the driver works either way.
 STREAM=0; command -v jq >/dev/null && STREAM=1
-RUN_ID=$(date '+%Y%m%dT%H%M%S')
+RUN_ID=$(date '+%Y%m%dT%H%M%S'); export LOOP_RUN_ID="$RUN_ID"   # Jev rows carry it: shadow-report joins them to gates.jsonl
 run_claude() {  # $1 log (the reply the driver parses), $2 model, $3 prompt
   local raw="$1"; [ "$STREAM" = 1 ] && raw="${1%.log}.jsonl"
   if [ "$STREAM" = 1 ]; then
