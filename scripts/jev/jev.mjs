@@ -19,6 +19,7 @@
 // Env: JEV_MODE off|shadow|prefilter (default off) · JEV_REJECT_P (0.85) · JEV_TIMEOUT_MS (15000)
 //      backend: TYPESAFE_API_KEY | OPENROUTER_API_KEY | AI_GATEWAY_API_KEY | JEV_BACKEND=mock
 //      JEV_MOCK_SCRIPT='{"<question id>":{"answer":0.97}}' (tests only, with JEV_BACKEND=mock)
+//      JEV_MOCK_DELAY_MS (tests only, with JEV_BACKEND=mock: delay the mock's answer, e.g. to hit the timeout)
 //      LEDGER / POSITIONING paths (defaults from loop.config.env names)
 //
 // Modes: off       → prints `JEV: OFF` without loading anything.
@@ -37,7 +38,23 @@ const MODE = (process.env.JEV_MODE || "off").toLowerCase();
 const REJECT_P = Number(process.env.JEV_REJECT_P || 0.85);
 const TIMEOUT_MS = Number(process.env.JEV_TIMEOUT_MS || 15000);
 
-const out = (verdict, why) => { console.log(`JEV: ${verdict} — ${why}`); process.exit(0); };
+// Every outcome after the mode check is logged — including UNAVAILABLE (timeouts, missing package,
+// backend errors) and argument ESCALATEs — so .loop/jev.jsonl can measure availability and latency, and
+// a round's calls stay paired in shadow-report even when Jev did not answer. Only OFF is not logged.
+let logCtx = null;   // set once the mode check passes
+const record = (verdict, why, extra = {}) => {
+  if (!logCtx) return;
+  try {
+    mkdirSync(join(ROOT, ".loop"), { recursive: true });
+    appendFileSync(join(ROOT, ".loop", "jev.jsonl"), JSON.stringify({
+      ts: new Date().toISOString(), task: logCtx.name, mode: MODE, verdict, why, input: logCtx.a,
+      // the driver exports these; they join a row to its round in .loop/gates.jsonl (shadow-report.mjs)
+      run: process.env.LOOP_RUN_ID || null, round: process.env.LOOP_ROUND ? Number(process.env.LOOP_ROUND) : null,
+      ...extra,
+    }) + "\n");
+  } catch { /* logging must never fail a round */ }
+};
+const out = (verdict, why, log = true) => { if (log) record(verdict, why); console.log(`JEV: ${verdict} — ${why}`); process.exit(0); };
 
 function args(argv) {
   const a = { _: [], option: [] };
@@ -269,6 +286,7 @@ const a = args(process.argv.slice(2));
 const name = a._[0];
 if (MODE === "off") out("OFF", "JEV_MODE=off");
 if (!["shadow", "prefilter"].includes(MODE)) out("OFF", `unknown JEV_MODE '${MODE}' (off | shadow | prefilter)`);
+logCtx = { name, a };
 
 let lib;
 try { lib = await import("jev-use"); }
@@ -284,25 +302,25 @@ try {
 
 const t = task(name, a, lib);
 let result;
+const t0 = Date.now();
 if (t.pre) result = { answers: {}, backend: "code", latencyMs: 0 };   // decided without asking Jev
 else try {
   result = await Promise.race([
-    jev.judge(t.state, t.questions),
+    (process.env.JEV_MOCK_DELAY_MS && (process.env.JEV_BACKEND || "").toLowerCase() === "mock"
+      ? new Promise((ok) => setTimeout(ok, Number(process.env.JEV_MOCK_DELAY_MS))).then(() => jev.judge(t.state, t.questions))
+      : jev.judge(t.state, t.questions)),
     new Promise((_, rej) => setTimeout(() => rej(new Error(`timeout after ${TIMEOUT_MS}ms`)), TIMEOUT_MS)),
   ]);
-} catch (e) { out("UNAVAILABLE", `${e.message}; run the LLM gate as usual`); }
+} catch (e) {
+  const why = `${e.message}; run the LLM gate as usual`;
+  record("UNAVAILABLE", why, { latencyMs: Date.now() - t0, timeout: /^timeout after/.test(e.message) });
+  out("UNAVAILABLE", why, false);
+}
 
 const [verdict, why] = t.pre || t.decide(result.answers);
-try {
-  mkdirSync(join(ROOT, ".loop"), { recursive: true });
-  appendFileSync(join(ROOT, ".loop", "jev.jsonl"), JSON.stringify({
-    ts: new Date().toISOString(), task: name, mode: MODE, verdict, why, input: a,
-    // the driver exports these; they join a shadow row to its round in .loop/gates.jsonl (shadow-report.mjs)
-    run: process.env.LOOP_RUN_ID || null, round: process.env.LOOP_ROUND ? Number(process.env.LOOP_ROUND) : null,
-    backend: result.backend, latencyMs: result.latencyMs,
-    answers: Object.fromEntries(Object.entries(result.answers).map(([k, v]) => [k, { answer: v.answer, confidence: v.confidence, escalate: v.escalate, reason: v.reason }])),
-  }) + "\n");
-} catch { /* logging must never fail a round */ }
-
-if (MODE === "shadow") out("SHADOW", `would=${verdict} ${why}. Shadow mode: do not route on this line`);
-out(verdict, why);
+record(verdict, why, {
+  backend: result.backend, latencyMs: result.latencyMs,
+  answers: Object.fromEntries(Object.entries(result.answers).map(([k, v]) => [k, { answer: v.answer, confidence: v.confidence, escalate: v.escalate, reason: v.reason }])),
+});
+if (MODE === "shadow") out("SHADOW", `would=${verdict} ${why}. Shadow mode: do not route on this line`, false);
+out(verdict, why, false);

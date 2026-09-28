@@ -31,6 +31,23 @@ expect("unknown mode is treated as off", run(idea, { JEV_MODE: "yes" }), /^JEV: 
 expect("shadow never emits a routable verdict", run(idea, { JEV_MODE: "shadow", ...script({ ...low, fabricated: { answer: 0.97 } }) }),
   /^JEV: SHADOW — would=REJECT fabricated/);
 
+console.log("### every outcome is logged, including UNAVAILABLE (a timeout must not vanish from jev.jsonl)");
+const JEV_LOG = resolve(dirname(JEV), "../../.loop/jev.jsonl");   // (LOG below is the same file)
+const lastRow = () => JSON.parse(readFileSync(JEV_LOG, "utf8").trim().split("\n").pop());
+expect("a timeout prints UNAVAILABLE", run(idea, { JEV_TIMEOUT_MS: "50", JEV_MOCK_DELAY_MS: "500", ...script(low) }), /^JEV: UNAVAILABLE — timeout after 50ms/);
+const tRow = lastRow();
+expect("… and is logged with timeout=true and its latency", `${tRow.task} ${tRow.verdict} ${tRow.timeout} ${tRow.latencyMs >= 40}`, /^prefilter UNAVAILABLE true true$/);
+run(idea, { JEV_MODE: "shadow", JEV_TIMEOUT_MS: "50", JEV_MOCK_DELAY_MS: "500", LOOP_RUN_ID: "R-t", LOOP_ROUND: "3", ...script(low) });
+const sRow = lastRow();
+expect("a shadow timeout is logged with run and round (stays paired in shadow-report)", `${sRow.mode} ${sRow.verdict} ${sRow.run}/${sRow.round}`, /^shadow UNAVAILABLE R-t\/3$/);
+const noKey = { JEV_BACKEND: "", TYPESAFE_API_KEY: "", OPENROUTER_API_KEY: "", AI_GATEWAY_API_KEY: "" };
+expect("no credentials → UNAVAILABLE", run(idea, noKey), /^JEV: UNAVAILABLE — No Jev credentials/);
+expect("… and is logged", `${lastRow().verdict} ${lastRow().timeout ?? "-"}`, /^UNAVAILABLE -$/);
+expect("an argument ESCALATE is logged too", (run(["prefilter"]), lastRow().verdict), /^ESCALATE$/);
+const before = readFileSync(JEV_LOG, "utf8");
+run(idea, { JEV_MODE: "off" });
+expect("OFF is the one outcome not logged", readFileSync(JEV_LOG, "utf8") === before ? "unchanged" : "grew", /^unchanged$/);
+
 console.log("### prefilter (fast-reject only)");
 expect("confident fabricated → REJECT", run(idea, script({ ...low, fabricated: { answer: 0.97 } })), /^JEV: REJECT — fabricated \(p=0\.97\)/);
 expect("confident duplicate → REJECT", run(idea, script({ ...low, duplicate: { answer: 0.9 } })), /^JEV: REJECT — duplicate/);
@@ -200,6 +217,11 @@ expect("a same-failure flag in a round that still shipped is a false flag", loop
 expect("the false retry flag is listed with its loop and attempt", loopOut, /FALSE FLAG R1\/1 \(build attempt 2\)/);
 expect("noop-cause: the next audit of the run labels the trigger", loopOut, /JEV_NOOP: triggers=3 confirmed=1 contradicted=1 unlabeled=1/);
 expect("JEV_SHADOW is still the last line", lastLine(loopOut), /^JEV_SHADOW:/);
+const av = (task, verdict, extra = {}) => ({ task, mode: "prefilter", run: "R1", round: 1, verdict, why: "w", latencyMs: 200, backend: "typesafe", ...extra });
+const availOut = report([av("prefilter", "PASS"), av("claim-evidence", "PASS", { latencyMs: 400 }), av("claim-evidence", "UNAVAILABLE", { timeout: true, latencyMs: 15000 }),
+  av("same-tactic", "UNAVAILABLE", { timeout: true }), av("same-tactic", "UNAVAILABLE"), av("claim-evidence", "UNSUPPORTED", { backend: "code", latencyMs: 0 })], []);
+expect("availability counts every call, unavailable and timeouts", availOut, /JEV_AVAIL: calls=6 unavailable=3 timeouts=2/);
+expect("per-task row: claim-evidence 3 calls, 1 unavailable, 1 timeout, median of answered model calls", availOut, /claim-evidence\s+3\s+1\s+1\s+400/);
 rmSync(rep, { recursive: true, force: true });
 
 console.log(fail ? "JEV TESTS FAILED" : "ALL JEV TESTS PASSED");

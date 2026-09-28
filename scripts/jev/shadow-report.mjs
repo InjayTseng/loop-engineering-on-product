@@ -24,6 +24,10 @@
 // noop-cause: an AUDIT_NOW is confirmed when the next state audit of that run says BROKEN and
 // contradicted when it says HEALTHY. JEV_NOOP: triggers=… confirmed=… contradicted=… unlabeled=…
 //
+// availability: every jev.mjs call is logged, UNAVAILABLE included (timeouts carry timeout=true), so the
+// report counts calls, unavailable answers and timeouts per task, with the median latency of answered
+// calls. JEV_AVAIL: calls=… unavailable=… timeouts=…
+//
 // Usage: node scripts/jev/shadow-report.mjs [--jev .loop/jev.jsonl] [--gates .loop/gates.jsonl]
 // Last line: JEV_SHADOW: SAFE | UNSAFE | NO_DATA — pairs=N false_rejects=F caught=C/R
 //   SAFE = at least one pair and zero false rejects. Agreement with value-critic is not ground
@@ -117,6 +121,19 @@ if (noopTriggers.length) {
   console.log(`noop-cause: audit triggers ${noopTriggers.length}   confirmed (audit BROKEN) ${noopConfirmed.length}   contradicted (audit HEALTHY) ${noopWrong.length}`);
   for (const x of noopWrong) console.log(`  CONTRADICTED ${x.r.run}/${x.r.round}: ${x.r.why}`);
 }
+// --- availability -------------------------------------------------------------------------------------
+const calls = jevRows.filter((r) => r.task && r.verdict !== "OFF");
+const median = (xs) => { const v = xs.filter((x) => typeof x === "number").sort((x, y) => x - y); return v.length ? v[Math.floor(v.length / 2)] : null; };
+if (calls.length) {
+  console.log("");
+  console.log("availability            calls  unavailable  timeouts  median ms (answered)");
+  for (const [task, rs] of group(calls, (r) => r.task)) {
+    const un = rs.filter((r) => r.verdict === "UNAVAILABLE");
+    console.log(`  ${task.padEnd(20)}${String(rs.length).padStart(7)}${String(un.length).padStart(13)}${String(un.filter((r) => r.timeout).length).padStart(10)}${String(median(rs.filter((r) => r.verdict !== "UNAVAILABLE" && r.backend !== "code").map((r) => r.latencyMs)) ?? "-").padStart(12)}`);
+  }
+}
+const unavail = calls.filter((r) => r.verdict === "UNAVAILABLE");
+console.log(`JEV_AVAIL: calls=${calls.length} unavailable=${unavail.length} timeouts=${unavail.filter((r) => r.timeout).length}`);
 console.log(`JEV_RETRY: flagged=${retryFlags.length} false_flags=${retryFalse.length} consistent=${retryOk.length} unlabeled=${retryFlags.length - retryFalse.length - retryOk.length}`);
 console.log(`JEV_NOOP: triggers=${noopTriggers.length} confirmed=${noopConfirmed.length} contradicted=${noopWrong.length} unlabeled=${noopTriggers.filter((x) => !x.audit).length}`);
 console.log(`JEV_CLAIM: checked=${claimRows.length} flagged=${flagged.length} confirmed=${confirmed.length} false_flags=${falseFlags.length} unlabeled=${unlabeled.length}`);
