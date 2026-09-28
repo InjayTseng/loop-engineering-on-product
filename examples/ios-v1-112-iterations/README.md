@@ -1,25 +1,27 @@
-# 對照範例：iOS 資產追蹤 app，112 輪（framework v1）
+# Contrast example: an iOS asset-tracking app, 112 rounds (framework v1)
 
-這是 v2 之前的 loop：同一個 PRP 骨架（`/generate-prp` → `/execute-prp`）、每 3 輪一次維護模式、builder 自己標 COMPLETED、`git push origin main`。App 名稱已匿名為 `________`。放在這裡是為了讓人看見「沒有價值閘的 loop 長什麼樣」，不是範本。
+This is the loop before v2: the same PRP skeleton (`/generate-prp` → `/execute-prp`), a maintenance round every 3 rounds, the builder marking its own work COMPLETED, and `git push origin main`. The app name is anonymized as `________`. It is here to show what a loop without a value gate looks like — not as a template.
 
-## 有什麼
+> **Language:** the as-run specs in this folder contain some Chinese from the original project and are kept verbatim as the record.
 
-- `innovation_loop_v1_as_run.md` — 最早的 loop（標題寫 8 Steps，實列 research → ideation → PRP → execute → test → fix → deploy → restart）
-- `innovation_loop_v2_as_run.md` — 同一條 loop 為這個 app 客製的版本：Morandi 設計系統、SnapshotTesting、`Iteration_Count % 3 == 0` 進維護模式、Rule of Pairs（每個 ViewModel 配一個測試檔）
-- `iteration_log.md` — 逐輪紀錄（日期、模式、任務、摘要、改動檔）：111 輪完成、第 112 輪 PENDING；第 76 輪有重複條目，原樣保留
-- `product_backlog.md` — 分階段的功能 backlog
+## What is here
 
-## 看什麼
+- `innovation_loop_v1_as_run.md` — the earliest loop (its title says 8 steps; it actually lists research → ideation → PRP → execute → test → fix → deploy → restart)
+- `innovation_loop_v2_as_run.md` — the same loop customized for this app: a Morandi design system, SnapshotTesting, maintenance mode when `Iteration_Count % 3 == 0`, and the Rule of Pairs (every ViewModel gets a test file)
+- `iteration_log.md` — the per-round log (date, mode, task, summary, files changed): 111 rounds completed, round 112 PENDING; round 76 appears twice and is kept as-is
+- `product_backlog.md` — the phased feature backlog
 
-1. **產量很高，方向由 backlog 決定**：Feature Mode 從 backlog 取 `[TODO]`，backlog 空了才研究。沒有任何一步問「這個值不值得做」——正確性（`./scripts/test.sh` exit 0）是唯一的 gate。
-2. **維護模式是唯一的多樣性機制**：每 3 輪強制補測試／refactor／修 bug。它擋住了品質崩壞，但擋不住功能方向的同質化。
-3. **自我核可**：同一個 agent 在 Step 6 跑測試、判定通過，Step 9 自己標 `[DONE]`。沒有獨立 validator。
-4. **直接 push main**：沒有分支隔離。
+## What to look at
 
-這三個缺口在另一個 iOS 健康 app 的 35 輪過夜實跑上變成可量化的失敗——31 輪是同一種指標追加。v2 的四個修補（價值閘、北極星、category 多樣性、plateau）由此而來，見 `docs/06-lessons.md`。
+1. **High output, direction set by the backlog.** Feature mode takes a `[TODO]` from the backlog and researches only when the backlog is empty. No step ever asks "is this worth doing?" — correctness (`./scripts/test.sh` exits 0) is the only gate.
+2. **Maintenance mode is the only diversity mechanism.** Every 3 rounds it forces tests / refactoring / bug fixes. That kept quality from collapsing, but not the feature direction from homogenizing.
+3. **Self-approval.** The same agent runs the tests in step 6, decides they passed, and marks its own work `[DONE]` in step 9. There is no independent validator.
+4. **Pushes straight to main.** No branch isolation.
 
-## 值得保留的
+In a separate 35-round overnight run on an iOS health app, these gaps became a measurable failure: 31 rounds appended the same kind of metric. v2's four fixes — value gate, north star, category diversity, plateau — came from that; see `docs/06-lessons.md`.
 
-- `Iteration_Count` 寫進 log 的做法（狀態外部化）
-- Rule of Pairs 與 Snapshot First（v3 的 PRP Validation Loop Level 2 沿用）
-- 每 3 輪維護模式（v3 的 Step 1b 是它的條件版：只在研究枯竭或 state BROKEN 時進）
+## Worth keeping
+
+- Writing `Iteration_Count` into the log (externalized state)
+- The Rule of Pairs and Snapshot First (carried into Level 2 of v3's PRP Validation Loop)
+- Maintenance every 3 rounds (v3's Step 1b is its conditional form: only when research runs dry or the state is BROKEN)

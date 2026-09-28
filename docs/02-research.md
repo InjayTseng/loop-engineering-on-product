@@ -1,41 +1,41 @@
-# 節點 R 與 F：研究只為了餵價值閘
+# Nodes R and F: research exists only to feed the value gate
 
-研究的產物不是「有趣的發現」，是「一個可以被 value-critic 打分的候選 slice」。沒有候選的 brief 是失敗的 brief——記一行 LOW_IMPACT 然後停，不要硬擠。
+The output of research is not "interesting findings". It is one candidate slice that `value-critic` can score. A brief with no candidate is a failed brief: log one LOW_IMPACT line and stop, do not force one.
 
-## R — `/research <階段或角度>`
+## R — `/research <stage or angle>`
 
-先讀三樣：`product/positioning.md`（研究哪一段）、`product/state.md`（那一段今天服務得了嗎——壞掉的階段不研究）、`_idea_ledger.md`（看過的一切都不重提）。
+Read three things first: `product/positioning.md` (which stage to research), `product/state.md` (can the product serve that stage today? a broken stage is not researched), and `_idea_ledger.md` (nothing already seen is proposed again).
 
-四個角度輪替（看 `research/briefs/` 最近用過哪個）：
+Four angles, in rotation (check which one `research/briefs/` used most recently):
 
-| 角度 | 問題 | 來源 |
+| Angle | Question | Sources |
 |---|---|---|
-| A 競品 | 最接近的 2–3 個產品在這一段做了什麼我們沒做的 | 產品頁、changelog、App Store 截圖 |
-| B 用戶痛 | 用戶說這一段少了什麼、哪裡困惑 | 評論、論壇、客服串 |
-| C 趨勢 | 這個品類過去 12 個月變了什麼（平台功能、常態） | 平台 release notes、產業文 |
-| D 技術差異化 | 我們在這一段能做、競品結構上做不到的事 | 自家 code 與資料 |
+| A Competitors | What do the 2–3 closest products do at this stage that we do not? | product pages, changelogs, App Store screenshots |
+| B User pain | What do users say is missing or confusing at this stage? | reviews, forums, support threads |
+| C Trends | What changed in this category over the last 12 months (platform features, new norms)? | platform release notes, industry writing |
+| D Technical edge | What can we do at this stage that competitors structurally cannot? | our own code and data |
 
-上限 2 次 WebSearch。第二次還沒新東西就停：`- [LOW_IMPACT] <角度> — <原因>` 進 ledger，最後一行 `RESEARCH: NONE`。
+At most 2 web searches. If the second one finds nothing new, stop: add `- [LOW_IMPACT] <angle> — <reason>` to the ledger and end with `RESEARCH: NONE`.
 
-brief 用 `research/TEMPLATE.md`，存 `research/briefs/YYYY-MM-DD-<slug>.md`，必填：問題與角度、3–6 條有 URL 或檔案路徑的發現、「已涵蓋」（哪些 ledger／commit 相鄰、這次哪裡不同）、候選 slice（標題／category／階段／假設「如果做 X，階段 Y 會更好因為 Z」／size／一個局部改動／誠實資料檢查）、給 validator 的一句 CLAIM。最後一行 `RESEARCH: CANDIDATE`。
+Briefs use `research/TEMPLATE.md` and are saved as `research/briefs/YYYY-MM-DD-<slug>.md`. Required: the question and angle; 3–6 findings with a URL or file path each; "already covered" (which ledger entries / commits are adjacent and how this one differs); the candidate slice (title / category / stage / hypothesis "if we do X, stage Y improves because Z" / size / one localized change / an honest-data check); and one CLAIM for the validator. Last line: `RESEARCH: CANDIDATE`.
 
-RESET 輪（driver 帶旗標）：刻意挑跟最近幾輪不同的階段與 category，從零想。
+RESET rounds (flagged by the driver): deliberately pick a different stage and category from the last few rounds and think from scratch.
 
-## F — `value-critic`（獨立子代理）
+## F — `value-critic` (independent subagent)
 
-它只回答一件事：這個想法這一輪值不值得建。預設 REJECT，門檻是「會推動北極星」不是「是個好主意」。
+It answers one question: is this idea worth building this round? The default is REJECT. The bar is "this plausibly moves the north star", not "this is a fine idea".
 
-三軸 1–5：
+Three axes, 1–5 each:
 
-- FUNNEL IMPACT — 有沒有推動定位指名的某一段；是定位的「下一段要推」加分；非目標直接 REJECT
-- NOVELTY — 機制上跟已出貨的不同嗎？同一招換標籤不算
-- EFFORT-FIT — 能不能一個小局部改動出貨
+- **FUNNEL IMPACT** — does it plausibly move a stage the positioning names? Extra credit if it is the positioning's "next stage to push". Anything in the non-goals is an outright REJECT.
+- **NOVELTY** — is the mechanism materially different from what already shipped? The same tactic under a new label is not novel.
+- **EFFORT-FIT** — can it ship as one small, localized change?
 
-信任閘（硬，蓋過 impact）：`TRUST_PRODUCT=true` 時，靠捏造訊號的想法一律 REJECT——hash 出來的「今日已有 N 人」、假熱門、假見證、假稀缺。真實資料（server 或 localStorage 來的）可以。這條是 v2 實跑後補的：loop 出貨了兩個 hash 種子的社交實證，value gate 當時放行。
+**Trust gate** (hard; overrides impact): with `TRUST_PRODUCT=true`, any idea that relies on fabricated signals is REJECTed — a hash-seeded "N people did this today", fake popularity, invented testimonials, manufactured scarcity. Real data (from a server or localStorage) is fine. This rule was added after the v2 run: the loop shipped two hash-seeded social-proof counters and the value gate let them through.
 
-`ACCEPT` 條件在 `loop.config.env` 的 `ACCEPT_IF`（預設 impact≥4 AND novelty≥3 AND effort_fit≥3）。REJECT 一定附 REDIRECT：一個更銳、誠實、會動漏斗的角度，本輪 agent 拿它回 R 重試（≤2 次）。
+The `ACCEPT` condition is `ACCEPT_IF` in `loop.config.env` (default `impact>=4 AND novelty>=3 AND effort_fit>=3`). A REJECT always carries a REDIRECT: a sharper, honest, funnel-moving angle that the round agent takes back to R (≤2 times).
 
-輸出協定：
+Output protocol:
 
 ```
 VALUE: ACCEPT | REJECT
@@ -43,17 +43,17 @@ CATEGORY / FUNNEL_STEP / SCORES: impact=? novelty=? effort_fit=?
 WHY / REDIRECT
 ```
 
-## Ledger 與 backlog：兩份檔、兩個用途
+## Ledger and backlog: two files, two jobs
 
-| 檔 | 內容 | 讀法 |
+| File | Content | How it is read |
 |---|---|---|
-| `_idea_ledger.md` | 每個想法一行，五種狀態：COMPLETED / IN_PROGRESS / FAILED / REJECTED / LOW_IMPACT | 去重用；每輪整份讀（小） |
-| `_product_backlog.md` | 通過價值閘的想法的完整規格 + validator 判定 | 只讀 `[IN_PROGRESS]` 那段；永遠不整份讀 |
+| `_idea_ledger.md` | One line per idea, five statuses: COMPLETED / IN_PROGRESS / FAILED / REJECTED / LOW_IMPACT | For dedup; read in full every round (it is small) |
+| `_product_backlog.md` | Full specs of ideas that passed the value gate + the validator's verdict | Only the `[IN_PROGRESS]` section is read; never the whole file |
 
-去重集合是「看過的一切」。v2 之前被拒的想法沒留痕，每輪都復活重評；加了 REJECTED／LOW_IMPACT 狀態後，iOS 健康 app 的查重從整讀 140K backlog 變成讀 12K ledger。
+The dedup set is everything ever seen. Before v2, rejected ideas left no trace and were re-evaluated every round. After REJECTED / LOW_IMPACT were added, dedup on the iOS health app went from reading a 140K backlog to reading a 12K ledger.
 
-真實的拒絕長什麼樣（web-v2 實跑，原文）：
+What a real rejection looks like (web-v2 run, translated; the original is in `examples/web-v2-20-rounds/as-run/_backlog.md`):
 
-> `[REJECTED] retention | core_value→(次日)activation_done | 明日天時預告：value-critic 判定無實際觸達機制（用戶離開頁面後資訊消失），impact=2，拒絕。REDIRECT→virality/acquisition 方向。`
+> `[REJECTED] retention | core_value→activation_done (next day) | "Tomorrow's forecast" teaser: value-critic found no actual re-engagement mechanism (the information disappears once the user leaves the page), impact=2, rejected. REDIRECT → virality/acquisition.`
 
-下一頁：[03-prd](03-prd.md)
+Next: [03-prd](03-prd.md)

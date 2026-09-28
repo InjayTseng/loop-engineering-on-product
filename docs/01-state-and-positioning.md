@@ -1,53 +1,53 @@
-# 節點 C 與 P：先看現況，再決定方向
+# Nodes C and P: look at the current state, then choose the direction
 
-迴圈每一輪都從「產品今天長什麼樣」出發，而不是從上一輪的記憶出發；方向（定位）則是唯一一個人必須在場、或由兩個高階 agent 對抗才能改的慢節點。這兩個節點是整張圖的錨。
+Every round starts from "what the product looks like today", not from the previous round's memory. The direction (positioning) is the one slow node that either needs a human present or two senior agents arguing until they agree. These two nodes anchor the whole graph.
 
-## C — Current state（`product/state.md`）
+## C — Current state (`product/state.md`)
 
-兩種深度：
+Two depths:
 
-| 深度 | 何時 | 誰 | 做什麼 | 產物 |
+| Depth | When | Who | What | Artifact |
 |---|---|---|---|---|
-| 輕量 | 每輪 Step 0 | 本輪 agent | 讀 config／positioning／state；`git log -8`；查 ledger 的 `[IN_PROGRESS]`；跑一次 `BUILD_CMD` 當 baseline | baseline 截圖／輸出（給 validator 對照） |
-| 深度 | 每次 run 開始、每 `AUDIT_EVERY` 輪、自主換定位之後 | `state-auditor`（獨立子代理） | 從零檢視 repo 與跑起來的產物：有什麼、哪裡壞、離定位的差距、技術債、量得到的數字 | 重寫 `product/state.md`，最後一行 `AUDIT: HEALTHY \| GAPS \| BROKEN` |
+| Light | Step 0 of every round | the round agent | Read config / positioning / state; `git log -8`; check the ledger for `[IN_PROGRESS]`; run `BUILD_CMD` once as a baseline | a baseline screenshot / output (for the validator to compare against) |
+| Deep | At the start of every run, every `AUDIT_EVERY` rounds, and after an autonomous positioning change | `state-auditor` (independent subagent) | Inspect the repo and the running product from scratch: what exists, what is broken, the gap vs positioning, tech debt, measurable numbers | Rewrites `product/state.md`; last line `AUDIT: HEALTHY \| GAPS \| BROKEN` |
 
-規則：
+Rules:
 
-- `state.md` 重寫不追加。它是 L0 現況頁，任何人打開只看一頁就知道產品在哪。
-- 數字量不到就寫 none，不估。
-- `BROKEN` 由 driver 接住：下一輪的 prompt 帶 MAINTENANCE 旗標，該輪只修不加（Step 1b），但仍要有一份 Size S 的 PRP 和 CLAIM 讓 validator 有東西驗。
-- ledger 裡懸空的 `[IN_PROGRESS]` 是上一輪當掉的 checkpoint：working tree 還有它就從 Step 5 續做，沒有就標 `[FAILED] — round crashed`。這是「可 resume」的實作。
+- `state.md` is rewritten, never appended. It is the one-page current-state view: anyone who opens it knows where the product stands.
+- If a number cannot be measured, write `none`. Do not estimate.
+- The driver catches `BROKEN`: the next round's prompt carries a MAINTENANCE flag and that round fixes without adding (Step 1b). It still needs a Size S PRP and a CLAIM so the validator has something to check.
+- A dangling `[IN_PROGRESS]` in the ledger is the checkpoint of a round that crashed. If the working tree still has its changes, resume from Step 5; if not, mark it `[FAILED] — round crashed`. This is how the loop is resumable.
 
-為什麼要有 C：v1 的 loop 每輪從自己的 backlog 出發；iOS 健康 app 那條跑到後期 backlog 已經 140K、和 repo 的實況脫節，agent 相信自己的筆記多過相信 code。C 把真相來源固定在 repo 與跑起來的產物。
+Why C exists: the v1 loop started every round from its own backlog. On the iOS health app, the backlog grew to 140K late in the run and drifted from what the repo actually contained; the agent trusted its notes more than the code. C pins the source of truth to the repo and the running product.
 
-## P — Positioning（`product/positioning.md`）
+## P — Positioning (`product/positioning.md`)
 
-一份檔、兩類欄位：
+One file, two kinds of field:
 
-| 欄位 | 內容 | 誰能改 |
+| Fields | Content | Who can change them |
 |---|---|---|
-| 硬欄位 | 目標用戶、問題、替代方案、為何是我們、非目標、信任規則 | 只有人（`/position` 互動模式） |
-| 軟欄位 | 北極星、漏斗、category 權重、下一段要推的階段 | 人；或 `strategist` + `positioning-critic` 兩個高階 agent 一致同意（標 `pending_human_review: true`） |
+| Hard | Target user, problem, alternatives, why us, non-goals, trust rules | Only a human (`/position`, interactive mode) |
+| Soft | North star, funnel, category weights, the next stage to push | A human; or `strategist` + `positioning-critic` when both senior agents agree (flagged `pending_human_review: true`) |
 
-下游所有判斷都對著它：`/research` 只研究定位指名的階段、`value-critic` 用它的漏斗與非目標打分、`trajectory-monitor` 用它判漂移。改了它，等於換了整條迴圈的目標函數——所以它是慢節點。
+Every downstream judgment is made against this file: `/research` only researches the stages it names, `value-critic` scores with its funnel and non-goals, `trajectory-monitor` judges drift against it. Changing it swaps the objective function of the whole loop, which is why it is the slow node.
 
-### 互動模式：多輪提問收斂
+### Interactive mode: converge through multi-round questions
 
-`/position` 先讀 `state.md`、最近 5 份 brief、ledger 最近 20 條 `[REJECTED]`，然後一輪一個問題、每題 2–4 個從證據推出的選項（AskUserQuestion）：對象 → 問題與替代 → 北極星與漏斗 → category 權重 → 非目標與信任規則 → 摘要確認。現值明顯還對的題直接跳過。APPROVE 後寫檔、`version+1`、`approved_by: human`，並把漏斗／category 鏡射進 `loop.config.env` 給腳本用。最後一行 `POSITION: APPROVED`。
+`/position` first reads `state.md`, the 5 most recent briefs and the 20 most recent `[REJECTED]` ledger entries, then asks one question per round, each with 2–4 options derived from that evidence (AskUserQuestion): target user → problem and alternatives → north star and funnel → category weights → non-goals and trust rules → confirm a summary. Questions whose current value is clearly still right are skipped. On APPROVE it writes the file, bumps `version`, sets `approved_by: human`, and mirrors the funnel and categories into `loop.config.env` for the scripts. Last line: `POSITION: APPROVED`.
 
-選項必須從證據來——「拒絕紀錄裡 retention 連拒 5 次，因為產品沒有任何外部再入觸發；要不要把 retention 先退休、改推 share？」是好選項；「A. 專注留存 B. 專注成長」不是。
+Options must come from evidence. "Retention was rejected 5 times in a row because the product has no external re-entry trigger; retire retention for now and push share instead?" is a good option. "A. Focus on retention  B. Focus on growth" is not.
 
-### 自主模式：兩個夠聰明的 agent 對抗到一致
+### Autonomous mode: two capable agents argue until they agree
 
-driver 在 value plateau 或 trajectory STOP 時，若 `AUTONOMOUS_POSITIONING=true`：
+On a value plateau or a trajectory STOP, if `AUTONOMOUS_POSITIONING=true`:
 
-1. `strategist`（高階模型）讀 state、ledger 的拒絕模式、近 20 個 commit，診斷為什麼枯竭，提「一個」軟欄位 delta。
-2. `positioning-critic`（同級、獨立 context）自己重讀證據，只找反證：證據撐不撐得住、有沒有偷改硬欄位、產品今天服務得了那個階段嗎、是不是同一招換標籤、有沒有說出什麼會證明它錯。
-3. `POSITION: AGREED` 才寫入；`DISAGREE` 什麼都不改，兩份輸出留在 `.loop/position-NNN.log` 給人看，driver 停下等人。
+1. `strategist` (senior model) reads the state, the rejection pattern in the ledger, and the last 20 commits; diagnoses why ideas ran dry; proposes exactly one soft-field delta.
+2. `positioning-critic` (same tier, independent context) re-reads the evidence itself and looks only for counter-evidence: does the evidence hold up, is a hard field being changed on the sly, can the product serve that stage today, is it the same tactic under a new label, does the proposal state what would prove it wrong.
+3. Written only on `POSITION: AGREED`. On `DISAGREE` nothing changes; both outputs stay in `.loop/position-NNN.log` for a human and the driver stops to wait.
 
-每次 run 最多做 `MAX_AUTO_POSITIONING` 次。兩個 agent 都不夠聰明時的保險是「不動」：錯的定位會浪費 20 輪，等人只浪費一晚。
+At most `MAX_AUTO_POSITIONING` times per run. The safeguard for when neither agent is smart enough is to change nothing: a wrong positioning wastes 20 rounds, waiting for a human wastes one night.
 
-## 這兩個節點怎麼接進迴圈
+## How the two nodes plug into the loop
 
 ```
 run start ─▶ C(deep) ─▶ [rounds: C(light) → R → F → S → D → V → Y] ─every K─▶ C(deep)
@@ -57,4 +57,4 @@ run start ─▶ C(deep) ─▶ [rounds: C(light) → R → F → S → D → V 
                                           └──── AGREED ◀── P(autonomous) ── or ── park, wait for /position
 ```
 
-下一頁：[02-research](02-research.md)
+Next: [02-research](02-research.md)

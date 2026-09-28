@@ -1,13 +1,24 @@
-# loop-engineering-on-product — 一條跑不完的產品迴圈
+# loop-engineering-on-product
 
-> **TL;DR (EN)** — A reference implementation of an autonomous product loop for Claude Code:
-> current-state audit → positioning → research → feature decision → PRD → develop → validate PRD →
-> deploy, running as a perpetual graph with two independent gates (value before building,
-> validation after), a deterministic driver, and real overnight run data. Copy `.claude/`,
-> `scripts/`, `product/`, `research/`, `PRPs/`, `loop.config.env`; write one adapter; run on a `loop` branch. Docs are in
-> Traditional Chinese; agent prompts and code are in English.
+**An autonomous product loop for Claude Code that keeps improving a real product overnight — and knows when to stop and ask.**
 
-從一份 PRP（Product Requirement Prompt）骨架開始，跑壞了三次，長成現在這張圖：
+Each round, a fresh agent looks at the product as it is today, researches one idea, has it judged for value *before* writing any code, writes a PRD, builds it, has it validated against that PRD by a *different* agent, and pushes it to an isolated branch. A deterministic shell driver runs the rounds, reads one result line per step, and decides when the loop has run out of good ideas. Nothing reaches your live branch unless a human merges it.
+
+It started as a single PRP (Product Requirement Prompt) skeleton, broke three times in real overnight runs, and grew into the graph below. The two real runs are in [`examples/`](examples/), with raw logs.
+
+## The problem it solves
+
+**A loop maximizes whatever its gates measure.** The first version had one gate — "does it build and pass tests?" — and on an iOS health app it spent 31 of 35 overnight rounds adding the same kind of metric. Every round was correct; almost none was worth shipping.
+
+So this loop judges value *before* building and correctness *after*, and neither judgment is made by the agent that did the work:
+
+| | Gate | Who judges | Question |
+|---|---|---|---|
+| Before building | **F — value gate** | `value-critic` (independent subagent) | Does this plausibly move the north star? Is it new? Is it one small change? Is it honest? |
+| After building | **B — correctness gate** | `BUILD_CMD` (your adapter, deterministic) | Does the product still build and render? |
+| After building | **V — validation** | `validator` (independent subagent) | Does the product actually do what the PRD's CLAIM promised — including what each button's label promises? |
+
+## How it works
 
 ```mermaid
 flowchart TB
@@ -16,128 +27,178 @@ flowchart TB
   classDef file fill:#f6f8fa,stroke:#57606a,color:#000
   classDef human fill:#fde2e2,stroke:#c81e1e,color:#000
 
-  subgraph ROUND["每一輪（fresh agent，10–20 分鐘）"]
+  subgraph ROUND["Every round (fresh agent, 10–20 min)"]
     direction LR
-    C["C 現況檢視<br/>product/state.md"]:::file
-    R["R 研究<br/>research/briefs/*.md"]:::file
-    F{"F 價值閘<br/>value-critic（獨立）<br/>VALUE: ACCEPT|REJECT"}:::gate
-    S["S PRD（每輪必有）<br/>PRPs/*.md + 一句 CLAIM"]:::file
-    D["D 開發<br/>/execute-prp"]
-    B{"B 正確性閘<br/>BUILD_CMD（adapter）<br/>BUILD: ok|fail"}:::gate
-    V{"V 驗證 PRD<br/>validator（獨立）<br/>VERDICT: PASS|FAIL"}:::gate
-    Y["Y 出貨<br/>push loop 分支<br/>LOOP_RESULT: … rejects=N"]
+    C["C Current state<br/>product/state.md"]:::file
+    R["R Research<br/>research/briefs/*.md"]:::file
+    F{"F Value gate<br/>value-critic (independent)<br/>VALUE: ACCEPT|REJECT"}:::gate
+    S["S PRD (every round)<br/>PRPs/*.md + one CLAIM"]:::file
+    D["D Develop<br/>/execute-prp"]
+    B{"B Correctness gate<br/>BUILD_CMD (adapter)<br/>BUILD: ok|fail"}:::gate
+    V{"V Validate PRD<br/>validator (independent)<br/>VERDICT: PASS|FAIL"}:::gate
+    Y["Y Ship<br/>push loop branch<br/>LOOP_RESULT: … rejects=N"]
     C --> R --> F
     F -- ACCEPT --> S --> D --> B
     F -. "REJECT + REDIRECT ≤2" .-> R
     B -- ok --> V
     B -. "fail ≤3" .-> D
     V -- PASS --> Y
-    V -. "FAIL 實作 ≤3" .-> D
-    V -. "FAIL CLAIM 本身" .-> S
+    V -. "FAIL: implementation ≤3" .-> D
+    V -. "FAIL: the CLAIM itself" .-> S
   end
 
-  subgraph DRIVER["driver：scripts/run-loop.sh（deterministic，只 parse 結果行）"]
+  subgraph DRIVER["Driver: scripts/run-loop.sh (deterministic; parses result lines only)"]
     direction LR
-    T{"T 軌跡<br/>trajectory-monitor<br/>每 N 輪"}:::gate
-    K["C 深度 audit<br/>state-auditor<br/>每 K 輪"]:::file
-    STOP{"停機？<br/>拒絕率 plateau ·<br/>RESET 仍拒 · TRAJ STOP"}:::gate
+    T{"T Trajectory<br/>trajectory-monitor<br/>every N rounds"}:::gate
+    K["C Deep audit<br/>state-auditor<br/>every K rounds"]:::file
+    STOP{"Stop?<br/>rejection-rate plateau ·<br/>RESET still rejected · TRAJ STOP"}:::gate
   end
 
-  subgraph SLOW["慢節點 P：定位（唯一能改目標函數的地方）"]
+  subgraph SLOW["Slow node P: positioning (the only place the objective can change)"]
     direction LR
-    P["P product/positioning.md<br/>硬欄位：對象／問題／信任規則<br/>軟欄位：漏斗／category／下一段"]:::slow
-    H(("人<br/>/position 多輪提問")):::human
-    A(("strategist +<br/>positioning-critic<br/>兩者同意才改軟欄位")):::slow
+    P["P product/positioning.md<br/>hard fields: user / problem / trust rules<br/>soft fields: funnel / categories / next stage"]:::slow
+    H(("Human<br/>/position, multi-round questions")):::human
+    A(("strategist +<br/>positioning-critic<br/>change soft fields only if both agree")):::slow
   end
 
   Y --> STOP
-  STOP -- 否 --> C
-  STOP -. 每 N 輪 .-> T
-  STOP -. 每 K 輪 .-> K
+  STOP -- no --> C
+  STOP -. every N .-> T
+  STOP -. every K .-> K
   T -- CONTINUE --> C
-  T -- REDIRECT（下輪 RESET） --> C
+  T -- "REDIRECT (next round RESET)" --> C
   T -- STOP --> P
   K -- HEALTHY / GAPS --> C
-  K -- BROKEN（下輪只修不加） --> C
-  STOP -- 是 --> P
+  K -- "BROKEN (next round: fix only)" --> C
+  STOP -- yes --> P
   H -- APPROVED --> P
   A -- AGREED --> P
-  A -. DISAGREE → 不改，等人 .-> H
+  A -. "DISAGREE → change nothing, wait" .-> H
   P --> C
-  H -. 外部回饋 / merge loop→live .-> P
+  H -. "external feedback / merge loop → live" .-> P
 ```
 
-讀法：黃色菱形是 gate（判斷交給獨立 agent，結果是一行可 parse 的字串）；灰色方塊是落在 git 裡的產物（每輪 fresh context，狀態全在檔案）；虛線是有上限的回邊（一輪一定在有限時間內結束）；藍色是唯一的慢節點——迴圈沒有終點，停機只是把控制權交回 P，人在就多輪提問收斂，人不在就兩個高階 agent 對抗到一致，都不成就停下來等人。loop 只在隔離分支跑，live 由人 merge。
+How to read it: yellow diamonds are **gates** — each judgment goes to an independent agent and comes back as one parseable line. Grey boxes are **artifacts in git** — every round starts with a fresh context, so all state lives in files. Dotted lines are **capped back-edges** — every round ends in bounded time. Blue is the one **slow node**: the loop has no end; "stopping" means handing control back to positioning (P). If a human is around, P converges through multi-round questions; if not, two senior agents argue until they agree; if they cannot, the loop stops and waits. The loop only ever runs on an isolated branch; a human merges to live.
 
-## 先讀這一份
+## Key design choices
 
-[`docs/00-pipeline.md`](docs/00-pipeline.md) — 圖的定義：9 個節點（含每 N 輪的 T）各自的產物、gate、失敗回邊、節奏，跑不完的 9 個工程條件，每個節點用什麼原語，driver 唯一讀的結果行協定。其餘文件都是它的展開。
+- **Two independent gates, placed on either side of the build.** Value is judged before any code exists; correctness and promise-keeping are judged after, against the PRD, by an agent that did not write the code.
+- **A dumb driver.** `scripts/run-loop.sh` never reasons. It parses one line per node (`VALUE:`, `VERDICT:`, `LOOP_RESULT: … rejects=N`) and applies numeric rules. That is what makes it safe to run overnight, resumable, auditable — and testable with a stub (`scripts/test-driver.sh`, 9 scenarios).
+- **Stop on the rejection rate, and hand off instead of ending.** When the value gate rejects more than ~1.5 ideas per idea shipped over a rolling window, the direction is exhausted; control goes to positioning, not to "done".
+- **Discover before building.** Every round starts from `product/state.md` and the running product, not from the previous round's notes.
+- **Positioning has hard and soft fields.** Target user, problem, and trust rules change only with a human. Funnel emphasis and the next stage to push can be changed overnight, and only when two senior agents independently agree.
+- **Trust rules are a hard gate.** On a trust product, an idea that relies on fabricated signals (fake counts, fake popularity, invented testimonials) is rejected no matter how well it would convert.
+- **Branch isolation is non-negotiable.** The driver refuses to run anywhere but the loop branch, re-checks every round, and a `pre-push` hook refuses the live branch at the git level.
+- **Every gate decision is recorded.** With `jq` installed, each gate's full report, verdict, and the evidence it gathered are appended to `.loop/gates.jsonl` — a cross-run dataset for calibrating the gates.
+- **Optional: cheap fast-rejects that can never approve.** With `JEV_MODE=prefilter`, [TypeSafe's Jev](https://docs.typesafe.ai) — a model that returns typed yes/no and pick answers instead of text, in about 0.2 s — can fast-reject obvious bad ideas (fabricated signals, duplicates, non-goals) and flag broken label promises before an LLM gate spends a subagent on them. It can never approve anything: every pass still goes through the LLM gate. Rollout is off → shadow → prefilter, gated by an offline eval.
+- **Optional: watch it live.** `node scripts/dashboard/serve.mjs` serves a local, read-only page: run history, which node the current round is at, and how far each stop condition is from firing.
 
-| 文件 | 內容 |
+## Evidence from real runs
+
+| Run | Setting | Rounds | What happened | What it changed |
+|---|---|---|---|---|
+| [v2, web](examples/web-v2-20-rounds/) | single-file fortune-telling site | 20 overnight (4h10m) | 20 shipped, 17 ideas rejected by the value gate, 7 categories, trajectory 4× CONTINUE, live branch never touched | plateau on rejection rate, the trust gate, the label-promise axis |
+| [v1, iOS](examples/ios-v1-112-iterations/) | asset-tracking app | 112 | high output, self-approved, pushed to main | the contrast: what a loop without a value gate looks like |
+
+[`docs/06-lessons.md`](docs/06-lessons.md) has the ten lessons behind the design, with numbers — including a bash 3.2 bug that meant the v2.1 plateau could never fire, found only by testing the driver with a stub.
+
+## Quick start
+
+Requirements: a product that builds, an `origin` remote, the `claude` CLI, Node ≥ 18. Optional: `jq` (gate recording); a TypeSafe, OpenRouter or AI Gateway API key (Jev pre-checks).
+
+```bash
+git checkout -b loop                    # never run on your live branch
+scripts/install-hooks.sh                # pre-push hook: refuses the live branch at the git level
+# fill in loop.config.env: north star, funnel, categories, DEPLOY_BRANCH, BUILD_CMD
+#   (unfilled placeholders make the first audit report BROKEN)
+/audit                                  # rewrite product/state.md
+/position                               # converge product/positioning.md through multi-round questions
+/loop-once                              # one interactive round: watch VALUE / PRP_SCORE / BUILD / VERDICT / LOOP_RESULT
+scripts/run-loop.sh 20                  # overnight; tail -f .loop/loop.log
+```
+
+In the morning: read `.loop/loop.log`, review the loop branch's commits one by one, and merge what you want. Full installation guide with an acceptance checklist: [`docs/08-adopt.md`](docs/08-adopt.md).
+
+Optional Jev pre-checks — follow the rollout order in [`docs/09-jev.md`](docs/09-jev.md):
+
+```bash
+(cd scripts/jev && npm ci) && export TYPESAFE_API_KEY=...          # environment only, never loop.config.env
+JEV_MODE=prefilter node scripts/jev/eval-backlog.mjs              # 1. offline eval on a past run: JEV_EVAL: SAFE?
+JEV_MODE=shadow scripts/run-loop.sh 20                            # 2. one night where Jev is asked but never obeyed
+node scripts/jev/shadow-report.mjs                                # 3. false rejects vs value-critic: JEV_SHADOW: SAFE?
+JEV_MODE=prefilter scripts/run-loop.sh 20                         # 4. only if both came back SAFE
+```
+
+Watch a run: `node scripts/dashboard/serve.mjs`, then open http://127.0.0.1:4400.
+
+## Documentation
+
+Start with [`docs/00-pipeline.md`](docs/00-pipeline.md): it defines the graph — the nine nodes (including T every N rounds), each one's artifact, gate, failure back-edges and cadence, the nine engineering conditions for a loop that never ends, the primitive behind each node, and the result-line protocol the driver reads. Everything else expands on it.
+
+| Doc | Covers |
 |---|---|
-| [01 現況與定位](docs/01-state-and-positioning.md) | C 節點（`product/state.md` 重寫不追加）、P 節點（人拍板的多輪提問，或兩個高階 agent 對抗） |
-| [02 研究與價值閘](docs/02-research.md) | `/research` 四角度輪替、`value-critic` 三軸 + 信任閘、ledger 去重 |
-| [03 PRD](docs/03-prd.md) | 每輪都有 PRP，size 只決定深度；一句可觀察的 CLAIM |
-| [04 建測驗出貨](docs/04-dev-and-validate.md) | `BUILD_CMD` 正確性閘 + 獨立 `validator` 9 軸（含 label-promise） |
-| [05 外圈](docs/05-loop.md) | driver、停機條件（拒絕率 plateau）、節奏、成本路由 |
-| [06 十條硬教訓](docs/06-lessons.md) | v1 → v2 → v2.1 → v3，含 v2.1 plateau 從未能觸發的 bash 3.2 bug |
-| [07 Adapters](docs/07-adapters.md) | web / iOS 兩個現成 adapter + 新場景四問 |
-| [08 裝進你的 repo](docs/08-adopt.md) | 五步、驗收清單 |
-| [09 Jev 預篩（選用）](docs/09-jev.md) | 用 typed 判斷模型在 LLM gate 前快速拒絕：off → shadow → prefilter，先離線評估再上線 |
-| [10 開發者 Dashboard](docs/10-dashboard.md) | `node scripts/dashboard/serve.mjs`：本機唯讀網頁，看歷程、這一輪走到哪一步、離停機門檻多遠 |
+| [01 Current state and positioning](docs/01-state-and-positioning.md) | Node C (`product/state.md`, rewritten not appended) and node P (a human converging through questions, or two senior agents arguing) |
+| [02 Research and the value gate](docs/02-research.md) | `/research` rotating four angles, `value-critic`'s three axes + trust gate, ledger dedup |
+| [03 PRD](docs/03-prd.md) | A PRP every round, depth set by size; one observable CLAIM |
+| [04 Build, test, validate, ship](docs/04-dev-and-validate.md) | The `BUILD_CMD` correctness gate + the independent `validator`'s 9 axes (including label-promise) |
+| [05 The outer loop](docs/05-loop.md) | The driver, stop conditions (rejection-rate plateau), cadence, cost routing, gate records |
+| [06 Ten hard lessons](docs/06-lessons.md) | v1 → v2 → v2.1 → v3, including the bash 3.2 bug that silently disabled the plateau |
+| [07 Adapters](docs/07-adapters.md) | The web and iOS adapters + four questions for a new setting |
+| [08 Install into your repo](docs/08-adopt.md) | Five steps and an acceptance checklist |
+| [09 Jev pre-checks (optional)](docs/09-jev.md) | A typed-judgment model that fast-rejects in front of the LLM gates: off → shadow → prefilter, offline eval first |
+| [10 Developer dashboard](docs/10-dashboard.md) | `node scripts/dashboard/serve.mjs`: a local read-only page with the history, the current step, and the distance to each stop threshold |
 
-## 真實實跑
-
-- [`examples/web-v2-20-rounds/`](examples/web-v2-20-rounds/) — v2，web，20 輪過夜：20 出貨、17 個想法被拒、7 類 category、原始 log 與當時的 agent 檔。修出了拒絕率 plateau、信任閘、label-promise 三條。
-- [`examples/ios-v1-112-iterations/`](examples/ios-v1-112-iterations/) — v1，iOS，112 輪：沒有價值閘的 loop 長什麼樣。
-
-## 結構
+## Repository layout
 
 ```
 .
 ├── product/
-│   ├── positioning.md        # P：硬欄位人專屬、軟欄位可自主微調
-│   └── state.md              # C：每次深度 audit 重寫
+│   ├── positioning.md        # P: hard fields human-only, soft fields refinable overnight
+│   └── state.md              # C: rewritten at every deep audit
 ├── research/
-│   ├── TEMPLATE.md           # brief 模板
-│   └── briefs/               # R：每輪一份，有來源、一個候選 slice
+│   ├── TEMPLATE.md           # brief template
+│   └── briefs/               # R: one per round, sourced, one candidate slice
 ├── PRPs/
-│   ├── templates/prp_base.md # S：PRD 模板（含 Validator CLAIM、Level 4 獨立驗證）
+│   ├── templates/prp_base.md # S: PRD template (Validator CLAIM, Level 4 independent validation)
 │   └── EXAMPLE_multi_agent_prp.md
 ├── .claude/
 │   ├── commands/             # /audit /position /research /generate-prp /execute-prp /loop-once
 │   ├── agents/               # state-auditor · strategist · positioning-critic · value-critic · validator · trajectory-monitor
 │   ├── tasks/
-│   │   ├── innovation_loop.md    # 一輪的規格（driver 每輪餵給 fresh agent）
-│   │   ├── _idea_ledger.md       # 去重帳本：看過的一切
-│   │   └── _product_backlog.md   # 通過價值閘的完整規格
-│   └── settings.local.json.example   # 複製成 settings.local.json（gitignored）；push 只准 loop 分支
+│   │   ├── innovation_loop.md    # the spec for one round (fed to a fresh agent every round)
+│   │   ├── _idea_ledger.md       # dedup ledger: everything ever seen
+│   │   └── _product_backlog.md   # full specs of ideas that passed the value gate
+│   └── settings.local.json.example   # copy to settings.local.json (gitignored); push allowed to the loop branch only
 ├── scripts/
-│   ├── run-loop.sh           # deterministic driver：分支隔離、audit、plateau、trajectory、自主定位、timeout（已修 v2.1 的 bash 3.2 plateau bug，別抄 examples/ 裡的 as-run 版）
-│   ├── test-driver.sh        # 用 stub claude 跑 7 個劇本，斷言 driver 的停機與路由
-│   ├── install-hooks.sh      # pre-push hook：拒推 DEPLOY_BRANCH
+│   ├── run-loop.sh           # the deterministic driver: branch isolation, audits, plateau, trajectory,
+│   │                         #   autonomous positioning, timeout, gate recording, Jev hooks, dashboard events
+│   ├── test-driver.sh        # 11 scenarios with a stub `claude`, asserting how the driver stops and routes
+│   ├── gate-log.sh           # appends every gate decision (report, verdict, evidence) to .loop/gates.jsonl
+│   ├── loop-event.sh         # appends structured run / round / step events to .loop/events.jsonl
+│   ├── jev/                  # optional Jev pre-checks: jev.mjs (4 tasks) · ledger.mjs · eval-backlog.mjs ·
+│   │                         #   shadow-report.mjs · test/ (npm test)
+│   ├── dashboard/            # serve.mjs · state.mjs · index.html (local, read-only) · test/
+│   ├── install-hooks.sh      # pre-push hook: refuses DEPLOY_BRANCH
 │   └── adapters/             # web-check.mjs · ios-shot.sh
-├── loop.config.env           # 唯一要填的設定
-├── docs/                     # 00–08
-├── examples/                 # 兩個真實 run
-└── .github/workflows/        # @claude mention + PR review（可選）
+├── loop.config.env           # the one file you fill in
+├── docs/                     # 00–10
+├── examples/                 # two real runs, raw logs included
+└── .github/workflows/        # @claude mentions + PR review (optional)
 ```
 
-## 五分鐘
+Do not copy the driver from `examples/*/as-run/`: those are the versions as they ran, bugs included, kept as evidence.
 
-```bash
-git checkout -b loop                    # 永不在 live 分支跑；需要 origin remote、claude CLI、Node ≥18
-scripts/install-hooks.sh                # pre-push hook：git 層拒推 live 分支
-# 填 loop.config.env：北極星、漏斗、category、DEPLOY_BRANCH、BUILD_CMD（佔位不填，第一次 audit 就 BROKEN）
-/audit                                  # 重寫 product/state.md
-/position                               # 多輪提問收斂 product/positioning.md
-/loop-once                              # 互動跑一輪，看 VALUE / PRP_SCORE / BUILD / VERDICT / LOOP_RESULT
-scripts/run-loop.sh 20                  # 過夜；tail -f .loop/loop.log
-```
+## Status and limits
 
-## GitHub Actions（可選）
+- **Proven by real runs (N=2):** the value gate, the independent validator, branch isolation, the result-line protocol, the web and iOS adapters.
+- **Designed but not yet proven by a real run (v3, N=0):** the current-state node C, the positioning node P and its autonomous mode, a PRD every round. [`docs/06-lessons.md`](docs/06-lessons.md) lists what each still needs to show.
+- **The plateau rule is tested, not observed.** The stub tests prove it stops when it should; no real run has triggered it yet.
+- **Jev pre-checks are N=0.** Wired up and tested with stubs and a mock backend; not yet shown to be worth it on a real run. Real use has already surfaced two self-match bugs (both fixed, with regression tests) — see [09-jev](docs/09-jev.md).
+- **Cost:** an overnight run with subagents can cost $50–200. See the cost routing in [05-loop](docs/05-loop.md#model-and-cost-routing).
 
-`claude.yml` 回應 issue／PR 裡的 `@claude`；`claude-code-review.yml` 自動 review PR。兩者都需要 repo secret `CLAUDE_CODE_OAUTH_TOKEN`。它們與 loop 無關，是同一個 repo 的日常協作層。
+## GitHub Actions (optional)
+
+`claude.yml` responds to `@claude` in issues and PRs; `claude-code-review.yml` reviews PRs automatically. Both need the repo secret `CLAUDE_CODE_OAUTH_TOKEN`. They are unrelated to the loop — they are the everyday collaboration layer for the same repo.
 
 ## License
 

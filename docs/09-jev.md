@@ -1,97 +1,100 @@
-# 09 Jev 預篩（選用）：在 LLM gate 前面快速拒絕
+# 09 Jev pre-checks (optional): fast-reject in front of the LLM gates
 
-> 狀態：N=0。這一層接好了、測過了（stub + mock），還沒在真實 run 上證明值得。預設 `JEV_MODE="off"`，關著時整套行為跟沒有這一頁完全一樣。
+> Status: N=0. This layer is wired up and tested (stub + mock) but has not yet been shown to be worth it on a real run. The default is `JEV_MODE="off"`; while it is off, the loop behaves exactly as if this page did not exist.
 
-## 為什麼
+## Why
 
-這張圖的判斷都落在 gate 上，而 gate 的輸出本來就是一行 typed 結果（`VALUE:` / `VERDICT:` / `TRAJ:`）。其中有一部分判斷不需要讀 code，也不需要寫字，只要回答「是／否」或「選哪個」：
+Every judgment in this graph lands on a gate, and a gate's output is already one typed result line (`VALUE:` / `VERDICT:` / `TRAJ:`). Some of those judgments need neither reading code nor writing text — only a yes/no or a pick:
 
-- 這個想法是不是靠捏造的數字？（教訓 5）
-- 它是不是 ledger 裡已經有的同一招？
-- 這次出貨是不是跟前幾次同一招、只換了 category？（教訓 4）
-- 按鈕做的事有沒有兌現它的 label？（教訓 9）
+- Does this idea rely on fabricated numbers? (lesson 5)
+- Is it the same tactic as something already in the ledger?
+- Is this ship the same tactic as the last few, only under a different category? (lesson 4)
+- Does the button do what its label promises? (lesson 9)
 
-[Jev](https://github.com/shitianfang/jev-use)（TypeSafe 的判斷模型）只做這種事：回傳帶機率的 yes/no、pick、score，p50 約 230 ms，每千次約 $0.02；沒把握時回 `escalate`，連不上也回 `escalate`，不會丟錯。web-v2 那 20 輪裡價值閘拒了 17 個想法，每一次都花了一整個 sonnet 子代理。
+[Jev](https://github.com/shitianfang/jev-use) (TypeSafe's judgment model) does only this kind of thing: it returns yes/no, pick, and score answers with probabilities, at about 230 ms p50 and about $0.02 per thousand calls. When it is unsure it returns `escalate`; when it cannot be reached it also returns `escalate` rather than throwing. In the 20 web-v2 rounds the value gate rejected 17 ideas, and each rejection cost a whole sonnet subagent.
 
-## 一條不可妥協的規則：Jev 只能拒絕，不能放行
+## One non-negotiable rule: Jev can only reject, never approve
 
-| 位置 | Jev 問什麼 | prefilter 模式下 Jev 能做的事 | Jev 不能做的事 |
+| Where | What Jev is asked | What Jev may do in prefilter mode | What Jev may not do |
 |---|---|---|---|
-| F 前（spec Step 2b） | `prefilter`：捏造訊號？ledger 重複？撞非目標／信任規則？ | `JEV: REJECT` → 當作價值閘 REJECT，記進 ledger、算進 `rejects=N`、回 R | 放行。`PASS` 之後 value-critic 照跑，而且看不到 Jev 的結果（保持獨立，教訓 3） |
-| V 內（validator 3b） | `label-promise`：觀察到的行為有沒有兌現 label？ | `JEV: MISMATCH` → 第 4 軸 Fail、列為 blocker | 讓第 4 軸 Pass。第 4 軸仍然要 validator 自己的證據 |
-| R 選題（`/research`） | `pick`：2–4 個候選裡哪個最可能推動「下一段」？ | `JEV: PICK <key>` → 先寫那一個 | 讓它跳過 value-critic |
-| driver 每次出貨後 | `same-tactic`：最新 commit 跟前 N 個是不是同一招？ | `JEV: SAME` → 這一輪**提前**跑 trajectory-monitor | 自己 STOP 或 REDIRECT。決定仍是 trajectory-monitor 的 `TRAJ:` |
+| Before F (spec Step 2b) | `prefilter`: fabricated signals? a duplicate in the ledger? hits a non-goal / trust rule? | `JEV: REJECT` → treated as a value-gate REJECT: recorded in the ledger, counted in `rejects=N`, back to R | Approve. After a `PASS`, value-critic runs as usual and never sees Jev's result (it stays independent, lesson 3) |
+| Inside V (validator 3b) | `label-promise`: does the observed behavior deliver what the label promises? | `JEV: MISMATCH` → axis 4 fails, listed as a blocker | Make axis 4 pass. Axis 4 still needs the validator's own evidence |
+| R's pick (`/research`) | `pick`: which of 2–4 candidates most likely moves the "next stage"? | `JEV: PICK <key>` → write that one first | Let it skip value-critic |
+| The driver, after every ship | `same-tactic`: is the newest commit the same tactic as the previous N? | `JEV: SAME` → run trajectory-monitor **early** this round | STOP or REDIRECT on its own. The decision is still trajectory-monitor's `TRAJ:` |
 
-不讓 Jev 碰的地方：driver 的停機邏輯（要能被 `test-driver.sh` 固定地測，教訓 10）、最終的 ACCEPT / PASS、定位節點 P。
+Where Jev is not allowed: the driver's stop logic (it must stay deterministically testable with `test-driver.sh`, lesson 10), the final ACCEPT / PASS, and the positioning node P.
 
-不對稱的理由：錯誤放行會出貨一個壞東西，這正是 v2 的三個漏網（「今日已有 N 人…」兩條、「今日熱門」一條）。錯誤拒絕只是少做一個想法，而且 ledger 裡會留下 `Jev fast-reject: <原因>`，人和 state-auditor 都看得到。所以 Jev 只放在「拒絕」這一側。
+Why the asymmetry: a false approval ships something bad — exactly v2's three escapes (the two "N people today…" counters and one "trending today"). A false rejection only loses one idea, and the ledger keeps a `Jev fast-reject: <reason>` line that both a human and the state-auditor can see. So Jev sits only on the rejecting side.
 
-## 已修的坑：想法跟自己比對
+## A bug already fixed: the idea compared against itself
 
-第一次真實使用時，`cf-billing` 被 Jev 判成「重複」（p=0.94）。原因：`/research`（Step 1）和 Step 2 都會先把這一輪的想法寫成 `[IN_PROGRESS]` 進 ledger，Step 2b 的預篩再拿整份 ledger 問「跟 ledger 裡哪一條重複？」，結果找到的正是它自己。離線評估和 shadow 對照都沒抓到：評估重播時只給「之前的」ledger，少了這一行，跟真實一輪的順序不一樣。
+The first real use rejected `cf-billing` as a "duplicate" (p=0.94). The cause: `/research` (Step 1) and Step 2 both write the round's idea into the ledger as `[IN_PROGRESS]` first, and Step 2b's prefilter then asked Jev whether the idea duplicates anything in the whole ledger — and it found itself. Neither the offline eval nor the shadow comparison caught it: the eval replayed only the *earlier* ledger, without that line, which does not match the order of a real round.
 
-修法（`scripts/jev/ledger.mjs`）：預篩一律不把 `[IN_PROGRESS]` 行給 Jev。Step 0 已經把崩潰留下的 `[IN_PROGRESS]` 處理掉（續做或標 FAILED），所以到 Step 2b 時剩下的 `[IN_PROGRESS]` 只會是這一輪自己的想法。其他狀態（REJECTED / COMPLETED / FAILED / LOW_IMPACT）照樣保留，因為那些才是真正的重複。評估也改成把該想法的 `[IN_PROGRESS]` 行放進重播用的 ledger，跟真實一輪一致。`npm test` 有回歸測試：mock 的答案是 state 的 hash，所以「加不加自己那一行，答案完全相同」就代表那一行沒送到 Jev。
+The fix (`scripts/jev/ledger.mjs`): the prefilter never shows Jev `[IN_PROGRESS]` lines. Step 0 has already resolved any `[IN_PROGRESS]` left by a crash (resumed or marked FAILED), so by Step 2b the only `[IN_PROGRESS]` left is this round's own idea. Every other status (REJECTED / COMPLETED / FAILED / LOW_IMPACT) is kept, because those are the real duplicates. The eval now also puts the idea's own `[IN_PROGRESS]` line into the replayed ledger, as a real round has it. `npm test` has a regression test: the mock's answers are a hash of the state, so "identical answers with and without the self line" proves the line never reaches Jev.
 
-第二次（`cf-cutover-runbook`，p=0.90）：專案自己在 ledger 加了 `[QUEUED]` 狀態，而且是「先問 Jev、再改成 IN_PROGRESS」的順序，第一版修法只排除 `[IN_PROGRESS]`，沒擋到。現在的規則改用「是不是這個點子自己」判斷：
-- 所有 `[IN_PROGRESS]` 行一律排除。
-- 狀態不是 COMPLETED / REJECTED / FAILED / LOW_IMPACT、而且提到這個點子標題的行，也排除，不管狀態名稱叫什麼（QUEUED、TODO、SPLIT…）。
-- 已結案的同名行一律保留：以前拒絕過又被提出來，本來就是真的重複。
+The second time (`cf-cutover-runbook`, p=0.90): the project had added its own `[QUEUED]` status to the ledger and asked Jev *before* flipping the line to IN_PROGRESS, which the first fix (excluding only `[IN_PROGRESS]`) did not cover. The rule is now "is this line the idea itself?":
+- Every `[IN_PROGRESS]` line is excluded.
+- A line whose status is not COMPLETED / REJECTED / FAILED / LOW_IMPACT *and* that names this idea's title is also excluded, whatever the status is called (QUEUED, TODO, SPLIT…).
+- A closed line with the same title is always kept: an idea rejected before and proposed again really is a duplicate.
 
-標題取 `--idea` 裡第一個 ` — ` 之前的文字，或用 `--title` 指定。標題比對以整個 token 為單位，所以 `cf-auth` 不會誤排除 `cf-auth-hardening`。
+The title is the text before the first ` — ` in `--idea`, or whatever `--title` specifies. Title matching is by whole token, so `cf-auth` does not exclude `cf-auth-hardening`.
 
-教訓：離線評估要重現的是**真實一輪當下的輸入**，不只是「當時的歷史資料」；而且各專案會自己加狀態，排除規則不能寫死某個狀態名稱。
+Lesson: an offline eval has to reproduce **the inputs a real round has at that moment**, not just "the history as it was"; and projects add their own statuses, so the exclusion rule must not hard-code a status name.
 
-## 常見誤用：把 PASS 當成放行
+## A common misuse: treating PASS as approval
 
-`JEV: PASS` 的意思是「沒有把握拒絕」，**不是**「可以做」。正確的分流：
+`JEV: PASS` means "not confident enough to reject", **not** "go ahead". The correct routing:
 
-| Jev 結果 | 下一步 |
+| Jev result | Next step |
 |---|---|
-| `REJECT` | 當作價值閘拒絕 |
-| `PASS` / `ESCALATE` / `UNAVAILABLE` | **一律**交給 value-critic |
+| `REJECT` | Treat it as a value-gate rejection |
+| `PASS` / `ESCALATE` / `UNAVAILABLE` | **Always** hand it to value-critic |
 
-如果 PASS 就直接照辦，等於讓一個只會回答是非題、而且看不到 code 的模型替你放行：它漏看的東西（例如 v2 那三條捏造數字）會直接出貨，正好違反這一頁唯一的原則。
+Acting on a PASS directly means letting a model that only answers yes/no questions — and cannot see the code — approve things for you. Whatever it misses (such as v2's three fabricated numbers) ships straight away, which breaks the one rule on this page.
 
-人已經拍板的 slice（遷移、既定 backlog）不必跑 Jev：它改變不了決定，只會增加誤殺的機會。Jev 要擋的是 loop 自己想出來的點子。
+Slices a human has already approved (migrations, an agreed backlog) do not need Jev: it cannot change the decision and only adds a chance of a false reject. Jev exists to screen the ideas the loop comes up with itself.
 
-## 三個模式
+## Three modes
 
 ```
-off        → 不呼叫（預設）
-shadow     → 呼叫、寫 .loop/jev.jsonl，印出 `JEV: SHADOW — would=…`；任何人都不能依這行分流
-prefilter  → 快速拒絕生效（REJECT / SAME / MISMATCH / PICK）；其他結果一律「照常走 LLM gate」
+off        → never called (default)
+shadow     → called, written to .loop/jev.jsonl, prints `JEV: SHADOW — would=…`; nobody may route on this line
+prefilter  → fast-rejects take effect (REJECT / SAME / MISMATCH / PICK); every other result means "go through the LLM gate as usual"
 ```
 
-`JEV_REJECT_P`（預設 0.85）：只有 P(yes) ≥ 這個值、而且 Jev 自己沒有 escalate，才算快速拒絕。`MISMATCH` 對稱地要求 P(delivers) ≤ 1 − 這個值。
+`JEV_REJECT_P` (default 0.85): a result counts as a fast-reject only when P(yes) ≥ this value and Jev itself did not escalate. `MISMATCH` symmetrically requires P(delivers) ≤ 1 − this value.
 
-## 上線順序（照做，別跳）
+## Rollout order (follow it; do not skip steps)
 
-1. **安裝**：`cd scripts/jev && npm ci`，然後把 `TYPESAFE_API_KEY`（或 `OPENROUTER_API_KEY` / `AI_GATEWAY_API_KEY`）放進跑 loop 的環境變數，不要寫進 `loop.config.env`。沒有 key 時每次呼叫都回 `JEV: UNAVAILABLE`，loop 照常跑。
-2. **離線評估**：`JEV_MODE=prefilter node scripts/jev/eval-backlog.mjs [你過去 run 的 backlog]`。它按時間順序重播每個想法，每次只給 Jev「當時」的 ledger，然後對照實際結果：
-   - value-critic 拒掉的 → 快速拒絕算對（省下一次 value-critic）
-   - 出貨但帶捏造訊號的 → 快速拒絕算抓到漏網
-   - 其他出貨的 → 快速拒絕算**誤殺**
-   最後一行：`JEV_EVAL: SAFE`（0 誤殺）、`UNSAFE`、`INCOMPLETE`（沒 key），或 `MOCK`（mock backend 只驗管線，答案是 hash 出來的，不算數）。預設資料是 `examples/web-v2-20-rounds/as-run/`：45 條 COMPLETED（其中 3 條是捏造訊號）、18 條 REJECTED。
-3. **shadow 跑一晚**：`JEV_MODE=shadow`。隔天看 `.loop/jev.jsonl` 裡的 `would=REJECT`，逐一對照同一個想法 value-critic 怎麼判。
-4. **prefilter**：2 和 3 都沒有誤殺才切。每跑一晚都要看 ledger 裡的 `Jev fast-reject` 行。
+1. **Install:** `cd scripts/jev && npm ci`, then put `TYPESAFE_API_KEY` (or `OPENROUTER_API_KEY` / `AI_GATEWAY_API_KEY`) in the environment the loop runs in — never in `loop.config.env`. Without a key every call returns `JEV: UNAVAILABLE` and the loop runs as usual.
+2. **Offline eval:** `JEV_MODE=prefilter node scripts/jev/eval-backlog.mjs [a past run's backlog]`. It replays every idea in chronological order, giving Jev only the ledger as it was *at that time*, and compares against what actually happened:
+   - rejected by value-critic → a fast-reject is correct (one value-critic call saved)
+   - shipped but carrying a fabricated signal → a fast-reject catches an escape
+   - any other ship → a fast-reject is a **false reject**
+   Last line: `JEV_EVAL: SAFE` (0 false rejects), `UNSAFE`, `INCOMPLETE` (no key), or `MOCK` (the mock backend only checks the plumbing; its answers are hashes and do not count). The default data is `examples/web-v2-20-rounds/as-run/`: 45 COMPLETED entries (3 of them fabricated signals) and 18 REJECTED.
+3. **One night in shadow:** `JEV_MODE=shadow`. The next day run `node scripts/jev/shadow-report.mjs`: it pairs every shadow prefilter call with the value-critic verdict on the same idea (from `.loop/gates.jsonl`, which needs `jq` on the machine that ran the loop) and lists every **false reject** — an idea Jev would have rejected that value-critic accepted. Last line: `JEV_SHADOW: SAFE` (0 false rejects), `UNSAFE`, or `NO_DATA`. Without `gates.jsonl`, compare each `would=REJECT` in `.loop/jev.jsonl` with value-critic's verdict by hand.
+4. **prefilter:** switch only when both steps 2 and 3 show no false rejects. After every night, read the `Jev fast-reject` lines in the ledger.
 
-mock backend 上 `eval-backlog.mjs` 會印出 20 條誤殺（最後一行是 `MOCK`，不會認證為 SAFE）。這是預期的：它證明這個評估真的擋得住一個亂答的判斷器。
+On the mock backend `eval-backlog.mjs` prints 20 false rejects (and a last line of `MOCK`, which never certifies SAFE). That is expected: it proves the eval really does block a judge that answers at random.
 
-## 檔案
+Agreement with value-critic in step 3 is not ground truth — value-critic can be wrong too. Step 2 compares against what actually happened; step 3 shows how the two judges differ on the same live inputs. Switch only when both are clean.
 
-| 檔案 | 作用 |
+## Files
+
+| File | Purpose |
 |---|---|
-| `scripts/jev/jev.mjs` | 四個任務（`prefilter` / `same-tactic` / `label-promise` / `pick`），一律 exit 0，只印一行 `JEV:`；每次呼叫寫進 `.loop/jev.jsonl` |
-| `scripts/jev/ledger.mjs` | 預篩看得到的 ledger：去掉這個點子自己的條目（`[IN_PROGRESS]`，以及同名、還沒結案的任何狀態） |
-| `scripts/jev/eval-backlog.mjs` | 離線評估，最後一行 `JEV_EVAL:` |
-| `scripts/jev/test/jev.test.mjs` | `npm test`：用 `JEV_BACKEND=mock` + `JEV_MOCK_SCRIPT` 固定每題答案，驗證每一條分流規則 |
-| `scripts/test-driver.sh` 劇本 8–10 | driver 端：prefilter 的 SAME 會提前跑 T；shadow 就算收到 SAME 也不動；off 完全不呼叫；UNAVAILABLE 不動 |
-| `loop.config.env` | `JEV_MODE`、`JEV_REJECT_P` |
+| `scripts/jev/jev.mjs` | The four tasks (`prefilter` / `same-tactic` / `label-promise` / `pick`); always exits 0 and prints one `JEV:` line; every call is written to `.loop/jev.jsonl`, tagged with the driver's run and round |
+| `scripts/jev/ledger.mjs` | The ledger the prefilter sees: this idea's own entries removed (`[IN_PROGRESS]`, plus any not-yet-closed status that names it) |
+| `scripts/jev/eval-backlog.mjs` | Offline eval; last line `JEV_EVAL:` |
+| `scripts/jev/shadow-report.mjs` | Pairs shadow prefilter calls with value-critic verdicts from `.loop/gates.jsonl`; last line `JEV_SHADOW:` |
+| `scripts/jev/test/jev.test.mjs` | `npm test`: pins every answer with `JEV_BACKEND=mock` + `JEV_MOCK_SCRIPT` and checks every routing rule, plus the shadow report's pairing |
+| `scripts/test-driver.sh` scenarios 8–10 | The driver side: a prefilter SAME runs T early; shadow does nothing even on SAME; off never calls Jev; UNAVAILABLE does nothing |
+| `loop.config.env` | `JEV_MODE`, `JEV_REJECT_P` |
 
-## 要驗證的假設（跑完再回來改這一段）
+## Hypotheses to verify (come back and rewrite this section after a run)
 
-- 省下的量：prefilter 下，價值閘前的快速拒絕佔所有拒絕的比例，以及每輪省下的時間。
-- 安全：真實 run 上誤殺是否為 0。只要出現一次誤殺，就退回 shadow 或調高 `JEV_REJECT_P`。
-- 早期偵測：`SAME` 提前觸發的 trajectory check，回 REDIRECT/STOP 的比例（接近 0 = 雜訊，就關掉這條）。
+- Savings: under prefilter, the share of all rejections that are fast-rejects before the value gate, and the time saved per round.
+- Safety: whether false rejects on real runs are 0. A single false reject means going back to shadow or raising `JEV_REJECT_P`.
+- Early detection: how often a trajectory check triggered early by `SAME` returns REDIRECT/STOP (close to 0 = noise; turn that check off).
 
-下一頁：回到 [00-pipeline](00-pipeline.md)
+Next: back to [00-pipeline](00-pipeline.md)
