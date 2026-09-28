@@ -19,6 +19,7 @@
 // Env: JEV_MODE off|shadow|prefilter (default off) · JEV_REJECT_P (0.85) · JEV_TIMEOUT_MS (15000)
 //      backend: TYPESAFE_API_KEY | OPENROUTER_API_KEY | AI_GATEWAY_API_KEY | JEV_BACKEND=mock
 //      JEV_MOCK_SCRIPT='{"<question id>":{"answer":0.97}}' (tests only, with JEV_BACKEND=mock)
+//      JEV_LOG (default .loop/jev.jsonl; tests point it at a temp file so they never touch the real dataset)
 //      JEV_MOCK_DELAY_MS (tests only, with JEV_BACKEND=mock: delay the mock's answer, e.g. to hit the timeout)
 //      LEDGER / POSITIONING paths (defaults from loop.config.env names)
 //
@@ -42,12 +43,15 @@ const TIMEOUT_MS = Number(process.env.JEV_TIMEOUT_MS || 15000);
 // backend errors) and argument ESCALATEs — so .loop/jev.jsonl can measure availability and latency, and
 // a round's calls stay paired in shadow-report even when Jev did not answer. Only OFF is not logged.
 let logCtx = null;   // set once the mode check passes
+const LOG_PATH = process.env.JEV_LOG || join(ROOT, ".loop", "jev.jsonl");
+// every row says which backend answered, so a mock row can never pass for a real one in shadow-report
+const CONFIGURED_BACKEND = (process.env.JEV_BACKEND || "").toLowerCase() === "mock" ? "mock" : "auto";
 const record = (verdict, why, extra = {}) => {
   if (!logCtx) return;
   try {
-    mkdirSync(join(ROOT, ".loop"), { recursive: true });
-    appendFileSync(join(ROOT, ".loop", "jev.jsonl"), JSON.stringify({
-      ts: new Date().toISOString(), task: logCtx.name, mode: MODE, verdict, why, input: logCtx.a,
+    mkdirSync(dirname(LOG_PATH), { recursive: true });
+    appendFileSync(LOG_PATH, JSON.stringify({
+      ts: new Date().toISOString(), task: logCtx.name, mode: MODE, verdict, why, input: logCtx.a, backend: CONFIGURED_BACKEND,
       // the driver exports these; they join a row to its round in .loop/gates.jsonl (shadow-report.mjs)
       run: process.env.LOOP_RUN_ID || null, round: process.env.LOOP_ROUND ? Number(process.env.LOOP_ROUND) : null,
       ...extra,

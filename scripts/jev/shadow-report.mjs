@@ -28,7 +28,12 @@
 // report counts calls, unavailable answers and timeouts per task, with the median latency of answered
 // calls. JEV_AVAIL: calls=… unavailable=… timeouts=…
 //
-// Usage: node scripts/jev/shadow-report.mjs [--jev .loop/jev.jsonl] [--gates .loop/gates.jsonl]
+// Only rows from real loop runs are counted: a run id in the driver's format (YYYYMMDDTHHMMSS) and a
+// backend other than mock. Test suites used to append to the real jev.jsonl, and an adopting repo that ran
+// `npm test` once carried 184 mock/test rows — including fake "timeouts" — next to 37 real calls.
+// --include-tests counts everything.
+//
+// Usage: node scripts/jev/shadow-report.mjs [--jev .loop/jev.jsonl] [--gates .loop/gates.jsonl] [--include-tests]
 // Last line: JEV_SHADOW: SAFE | UNSAFE | NO_DATA — pairs=N false_rejects=F caught=C/R
 //   SAFE = at least one pair and zero false rejects. Agreement with value-critic is not ground
 //   truth; together with eval-backlog.mjs it is the evidence for switching to prefilter.
@@ -46,9 +51,14 @@ const VALUE_AGENT = process.env.GATE_VALUE_AGENT || "value-critic";
 const rows = (p) => existsSync(p)
   ? readFileSync(p, "utf8").split("\n").flatMap((l) => { try { return l.trim() ? [JSON.parse(l)] : []; } catch { return []; } })
   : [];
+const INCLUDE_TESTS = process.argv.includes("--include-tests");
+const LOOP_RUN = /^\d{8}T\d{6}$/;   // scripts/run-loop.sh: RUN_ID=$(date '+%Y%m%dT%H%M%S')
+const allJev = rows(JEV);
+const JEV_ROWS = INCLUDE_TESTS ? allJev : allJev.filter((r) => r.backend !== "mock" && LOOP_RUN.test(String(r.run || "")));
+if (JEV_ROWS.length < allJev.length) console.log(`(ignored ${allJev.length - JEV_ROWS.length} of ${allJev.length} jev.jsonl rows that are not from a loop run: mock backend or no driver run id; --include-tests to count them)`);
 const group = (list, key) => list.reduce((m, r) => m.set(key(r), [...(m.get(key(r)) || []), r]), new Map());
 
-const shadow = rows(JEV).filter((r) => r.task === "prefilter" && r.mode === "shadow" && r.run && r.round != null);
+const shadow = JEV_ROWS.filter((r) => r.task === "prefilter" && r.mode === "shadow" && r.run && r.round != null);
 const critic = rows(GATES).filter((r) => r.agent === VALUE_AGENT && r.kind === "round");
 const jevBy = group(shadow, (r) => `${r.run}/${r.round}`);
 const gateBy = group(critic, (r) => `${r.run}/${r.round}`);
@@ -82,7 +92,7 @@ for (const p of falseRejects) console.log(`  FALSE REJECT ${p.key}: ${p.idea}\n 
 
 // --- claim-evidence -----------------------------------------------------------------------------------
 const VALIDATOR = process.env.GATE_VALIDATOR_AGENT || "validator";
-const claimRows = rows(JEV).filter((r) => r.task === "claim-evidence" && r.run && r.input?.round != null);
+const claimRows = JEV_ROWS.filter((r) => r.task === "claim-evidence" && r.run && r.input?.round != null);
 const revals = group(rows(GATES).filter((r) => r.kind === "reval" && r.agent === VALIDATOR), (r) => `${r.run}/${r.round}`);
 const flagged = claimRows.filter((r) => ["UNSUPPORTED", "CONTRADICTED"].includes(r.verdict));
 const labelled = flagged.map((r) => ({ r, key: `${r.run}/${Number(r.input.round)}`, reval: revals.get(`${r.run}/${Number(r.input.round)}`)?.at(-1)?.verdict?.token ?? null }));
@@ -103,7 +113,7 @@ const roundOutcome = (run, round) => {   // shipped = claimed SHIPPED and HEAD m
   if (!g.length) return null;
   return g.some((r) => /^LOOP_RESULT:\s*SHIPPED/.test(r.outcome || "") && r.commit) ? "SHIPPED" : "NOT_SHIPPED";
 };
-const jevRows = rows(JEV);
+const jevRows = JEV_ROWS;
 const retryFlags = jevRows.filter((r) => r.task === "same-failure" && r.verdict === "SAME_FAILURE" && r.run && r.round != null)
   .map((r) => ({ r, outcome: roundOutcome(r.run, Number(r.round)) }));
 const retryFalse = retryFlags.filter((x) => x.outcome === "SHIPPED");

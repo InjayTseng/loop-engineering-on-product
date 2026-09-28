@@ -2,18 +2,24 @@
 // JEV_MOCK_SCRIPT pins each question's answer, so every routing rule is asserted without a network.
 // Usage: cd scripts/jev && npm ci && npm test       (exit 0 = all pass)
 import { execFileSync } from "node:child_process";
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { ledgerForPrefilter, titleOf } from "../ledger.mjs";
 
 const JEV = resolve(dirname(fileURLToPath(import.meta.url)), "../jev.mjs");
+// Every jev.mjs call in this suite logs to a temp file (JEV_LOG). The repo's own .loop/jev.jsonl is the real
+// dataset shadow-report reads: an adopting repo running `npm test` once used to add 184 mock rows to it.
+const REAL_LOG = resolve(dirname(JEV), "../../.loop/jev.jsonl");
+const realBefore = existsSync(REAL_LOG) ? readFileSync(REAL_LOG, "utf8") : null;
+const LOG_DIR = mkdtempSync(join(tmpdir(), "jev-log-"));
+const TEST_LOG = join(LOG_DIR, "jev.jsonl");
 let fail = 0;
 function run(args, env = {}, cwd = undefined) {
   return execFileSync("node", [JEV, ...args], {
     cwd, encoding: "utf8",
-    env: { ...process.env, JEV_BACKEND: "mock", JEV_MODE: "prefilter", ...env },
+    env: { ...process.env, JEV_BACKEND: "mock", JEV_MODE: "prefilter", JEV_LOG: TEST_LOG, ...env },
   }).trim().split("\n").pop();
 }
 function expect(name, got, re) {
@@ -32,7 +38,7 @@ expect("shadow never emits a routable verdict", run(idea, { JEV_MODE: "shadow", 
   /^JEV: SHADOW — would=REJECT fabricated/);
 
 console.log("### every outcome is logged, including UNAVAILABLE (a timeout must not vanish from jev.jsonl)");
-const JEV_LOG = resolve(dirname(JEV), "../../.loop/jev.jsonl");   // (LOG below is the same file)
+const JEV_LOG = TEST_LOG;
 const lastRow = () => JSON.parse(readFileSync(JEV_LOG, "utf8").trim().split("\n").pop());
 expect("a timeout prints UNAVAILABLE", run(idea, { JEV_TIMEOUT_MS: "50", JEV_MOCK_DELAY_MS: "500", ...script(low) }), /^JEV: UNAVAILABLE — timeout after 50ms/);
 const tRow = lastRow();
@@ -79,7 +85,7 @@ expect("titleOf reads the spec's --idea shape", titleOf("cf-billing — reserve 
 expect("helper keeps an indented or mid-text mention", ledgerForPrefilter("- [REJECTED] was [IN_PROGRESS] once\n"), /^- \[REJECTED\]/);
 // Mock answers hash the state, so equal answers ⇔ Jev saw the same ledger.
 const dir = mkdtempSync(join(tmpdir(), "jev-ledger-"));
-const LOG = resolve(dirname(JEV), "../../.loop/jev.jsonl");
+const LOG = TEST_LOG;
 const answersWith = (ledgerText) => {
   const p = join(dir, "ledger.md"); writeFileSync(p, ledgerText);
   run(["prefilter", "--idea", "cf-billing: reserve balance per ticket"], { LEDGER: p, POSITIONING: join(dir, "none.md") });
@@ -175,7 +181,7 @@ const sh = (round, verdict, ideaText) => ({ task: "prefilter", mode: "shadow", r
 const vc = (round, token) => ({ agent: "value-critic", kind: "round", run: "R1", round, verdict: { key: "VALUE", token }, report: `SCORES: impact=4\nVALUE: ${token}` });
 const report = (jevRows, gateRows) => {
   writeFileSync(join(rep, "jev.jsonl"), jl(jevRows)); writeFileSync(join(rep, "gates.jsonl"), jl(gateRows));
-  return execFileSync("node", [REPORT, "--jev", join(rep, "jev.jsonl"), "--gates", join(rep, "gates.jsonl")], { encoding: "utf8" });
+  return execFileSync("node", [REPORT, "--jev", join(rep, "jev.jsonl"), "--gates", join(rep, "gates.jsonl"), "--include-tests"], { encoding: "utf8" });
 };
 const lastLine = (s) => s.trim().split("\n").pop();
 // round 1: two ideas, in order; round 2: Jev rejects one value-critic accepted; round 3: counts differ
@@ -191,7 +197,7 @@ const prefilterRow = { ...sh(4, "REJECT", "x"), mode: "prefilter" };
 expect("prefilter-mode rows are ignored (value-critic never saw a fast-rejected idea)", lastLine(report([prefilterRow], [])), /^JEV_SHADOW: NO_DATA/);
 const renamed = (jevRows, gateRows, name) => {
   writeFileSync(join(rep, "jev.jsonl"), jl(jevRows)); writeFileSync(join(rep, "gates.jsonl"), jl(gateRows));
-  return execFileSync("node", [REPORT, "--jev", join(rep, "jev.jsonl"), "--gates", join(rep, "gates.jsonl")],
+  return execFileSync("node", [REPORT, "--jev", join(rep, "jev.jsonl"), "--gates", join(rep, "gates.jsonl"), "--include-tests"],
     { encoding: "utf8", env: { ...process.env, GATE_VALUE_AGENT: name } });
 };
 expect("a renamed value gate is paired via GATE_VALUE_AGENT", lastLine(renamed([sh(5, "REJECT", "x")], [{ ...vc(5, "REJECT"), agent: "growth-critic" }], "growth-critic")),
@@ -222,7 +228,27 @@ const availOut = report([av("prefilter", "PASS"), av("claim-evidence", "PASS", {
   av("same-tactic", "UNAVAILABLE", { timeout: true }), av("same-tactic", "UNAVAILABLE"), av("claim-evidence", "UNSUPPORTED", { backend: "code", latencyMs: 0 })], []);
 expect("availability counts every call, unavailable and timeouts", availOut, /JEV_AVAIL: calls=6 unavailable=3 timeouts=2/);
 expect("per-task row: claim-evidence 3 calls, 1 unavailable, 1 timeout, median of answered model calls", availOut, /claim-evidence\s+3\s+1\s+1\s+400/);
+// by default only real loop rows count: a driver run id (YYYYMMDDTHHMMSS) and a non-mock backend
+writeFileSync(join(rep, "gates.jsonl"), "");
+writeFileSync(join(rep, "jev.jsonl"), [
+  { task: "prefilter", run: "20260928T221623", round: 1, verdict: "PASS", backend: "typesafe", latencyMs: 306 },
+  { task: "prefilter", run: "20260928T221623", round: 1, verdict: "UNAVAILABLE", backend: "auto", timeout: true, latencyMs: 15001 },
+  { task: "prefilter", run: "20260928T221623", round: 2, verdict: "PASS", backend: "mock", latencyMs: 1 },
+  { task: "prefilter", run: "R-t", round: 3, verdict: "UNAVAILABLE", timeout: true, latencyMs: 51 },
+  { task: "prefilter", run: null, verdict: "UNAVAILABLE", timeout: true, latencyMs: 50 },
+].map((r) => JSON.stringify(r)).join("\n") + "\n");
+const real = execFileSync("node", [REPORT, "--jev", join(rep, "jev.jsonl"), "--gates", join(rep, "gates.jsonl")], { encoding: "utf8" });
+expect("default: mock rows and rows without a driver run id are ignored, and it says so", real, /ignored 3 of 5 jev\.jsonl rows/);
+expect("default: only the real calls are counted (one real timeout)", real, /JEV_AVAIL: calls=2 unavailable=1 timeouts=1/);
+const everything = execFileSync("node", [REPORT, "--jev", join(rep, "jev.jsonl"), "--gates", join(rep, "gates.jsonl"), "--include-tests"], { encoding: "utf8" });
+expect("--include-tests counts every row", everything, /JEV_AVAIL: calls=5 unavailable=3 timeouts=3/);
 rmSync(rep, { recursive: true, force: true });
+
+console.log("### isolation: the suite never writes the repo's own .loop/jev.jsonl");
+const realAfter = existsSync(REAL_LOG) ? readFileSync(REAL_LOG, "utf8") : null;
+expect("the real jev.jsonl is exactly as before the suite", realAfter === realBefore ? "unchanged" : "changed", /^unchanged$/);
+expect("mock rows are tagged backend=mock", JSON.parse(readFileSync(TEST_LOG, "utf8").trim().split("\n")[0]).backend, /^mock$/);
+rmSync(LOG_DIR, { recursive: true, force: true });
 
 console.log(fail ? "JEV TESTS FAILED" : "ALL JEV TESTS PASSED");
 process.exit(fail);
