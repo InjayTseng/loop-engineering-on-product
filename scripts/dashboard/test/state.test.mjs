@@ -1,11 +1,12 @@
 // state.test.mjs — deterministic tests for the dashboard's read model and server.
 // Usage: node scripts/dashboard/test/state.test.mjs        (exit 0 = all pass; no dependencies)
 import { spawn } from "node:child_process";
+import { get } from "node:http";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { buildState, currentActivity, parseLoopLog, stopMeters } from "../state.mjs";
+import { buildState, currentActivity, hostAllowed, parseLoopLog, stopMeters } from "../state.mjs";
 import { writeFixture } from "./fixture.mjs";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -81,6 +82,11 @@ console.log("### current activity and log parsing");
   eq("v3 header: jev / branch parsed", [ev[0].jev, ev[0].branch], ["off", "loop"]);
 }
 
+console.log("### Host allow-list");
+eq("loopback names on the bound port", ["127.0.0.1:4400", "localhost:4400", "[::1]:4400", "LOCALHOST"].map((h) => hostAllowed(h, "127.0.0.1", 4400)), [true, true, true, true]);
+eq("foreign names, wrong port, missing", ["evil.example:4400", "127.0.0.1.evil.example", "localhost:4401", undefined].map((h) => hostAllowed(h, "127.0.0.1", 4400)), [false, false, false, false]);
+eq("non-loopback bind is the user's explicit choice", hostAllowed("192.168.1.5:4400", "0.0.0.0", 4400), true);
+
 console.log("### server: read-only, localhost, file allow-list");
 {
   const port = 4490 + Math.floor(Math.random() * 400);
@@ -94,6 +100,10 @@ console.log("### server: read-only, localhost, file allow-list");
   eq("traversal refused", await code("/api/file?path=../../etc/passwd"), 403);
   eq("config not served", await code("/api/file?path=loop.config.env"), 403);
   eq("POST refused", await code("/api/state", { method: "POST" }), 405);
+  // fetch() will not let a page (or this test) choose Host; node:http will, like a rebinding attacker's DNS.
+  const withHost = (h) => new Promise((ok, no) => get({ host: "127.0.0.1", port, path: "/api/state", headers: { host: h } }, (r) => { r.resume(); ok(r.statusCode); }).on("error", no));
+  eq("foreign Host refused (DNS rebinding)", await withHost(`evil.example:${port}`), 421);
+  eq("localhost Host accepted", await withHost(`localhost:${port}`), 200);
   srv.kill();
 }
 rmSync(dir, { recursive: true, force: true });

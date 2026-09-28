@@ -12,7 +12,7 @@ import { createServer } from "node:http";
 import { readFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { ALLOWED_FILE, buildState } from "./state.mjs";
+import { ALLOWED_FILE, buildState, hostAllowed } from "./state.mjs";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const args = {};
@@ -32,6 +32,7 @@ const send = (res, code, type, body) => {
 const server = createServer((req, res) => {
   const url = new URL(req.url, "http://x");
   try {
+    if (!hostAllowed(req.headers.host, host, port)) return send(res, 421, "text/plain", "unexpected Host");
     if (req.method !== "GET") return send(res, 405, "text/plain", "read-only");
     if (url.pathname === "/") return send(res, 200, "text/html; charset=utf-8", readFileSync(join(HERE, "index.html")));
     if (url.pathname === "/api/state") return send(res, 200, "application/json; charset=utf-8", JSON.stringify(buildState(root, opts)));

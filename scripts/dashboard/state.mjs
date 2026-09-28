@@ -194,6 +194,14 @@ function commitFiles(root, commit) {
     .filter((f) => /^(PRPs|research\/briefs)\/.+\.md$/.test(f));
 }
 
+// DNS-rebinding guard: when bound to loopback, only answer requests addressed to a loopback name.
+const LOOPBACK = new Set(["127.0.0.1", "localhost", "[::1]", "::1"]);
+export function hostAllowed(hostHeader, bindHost, port) {
+  if (!LOOPBACK.has(bindHost)) return true;
+  const m = /^(\[[^\]]+\]|[^:]+)(?::(\d+))?$/.exec(String(hostHeader || "").toLowerCase());
+  return Boolean(m && LOOPBACK.has(m[1]) && (m[2] === undefined || Number(m[2]) === Number(port)));
+}
+
 export const ALLOWED_FILE = /^(PRPs\/[^/]+\.md|research\/briefs\/[^/]+\.md|product\/(state|positioning)\.md|\.loop\/(round|audit|traj|position)-\d{3}\.log)$/;
 
 export function buildState(root, opts = {}) {
