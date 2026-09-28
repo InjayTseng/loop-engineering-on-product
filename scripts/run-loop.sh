@@ -28,6 +28,10 @@
 #         .loop/traj-NNN.log · .loop/position-NNN.log · .loop/state (WAITING_FOR_P when parked) ·
 #         .loop/jev.jsonl (every Jev call, any mode) · .loop/events.jsonl (structured run / round /
 #         step events for scripts/dashboard/; the round agent adds `step` events via scripts/loop-event.sh)
+#         Each *.log is the reply the driver parses; with jq installed a sibling *.jsonl holds the
+#         full stream-json transcript, and every gate decision in it (VALUE / VERDICT / TRAJ / AUDIT /
+#         POSITION, with the gate's full report and evidence) is appended to .loop/gates.jsonl —
+#         the cumulative, cross-run dataset for calibrating the gates (scripts/gate-log.sh).
 #
 # Portability: written for macOS /bin/bash 3.2. Do NOT use `${arr[@]: -N}` (returns an empty
 # array when the array is shorter than N — the bug that silently disabled v2.1's plateau).
@@ -73,10 +77,29 @@ verdict() {  # $1 file, $2 key → first UPPERCASE token after "KEY:" (e.g. AGRE
   resline "$1" "$2" | sed -E "s/^[[:space:]]*$2:[[:space:]]*([A-Z_]+).*/\1/"; }
 
 # --- headless call with a per-round timeout (portable: macOS has no `timeout`) -----------------
-run_claude() {  # $1 log, $2 model, $3 prompt
-  "$CLAUDE_BIN" -p "$3" --dangerously-skip-permissions --model "$2" >"$1" 2>&1 & local pid=$!
-  ( sleep "$ROUND_TIMEOUT"; kill "$pid" 2>/dev/null && echo "TIMEOUT after ${ROUND_TIMEOUT}s" >>"$1" ) & local wd=$!
-  wait "$pid" 2>/dev/null; kill "$wd" 2>/dev/null; wait "$wd" 2>/dev/null; return 0; }
+# With jq, capture the full stream-json transcript (subagent reports + their tool calls) so the gate
+# decisions can be recorded; without it, fall back to plain text — the driver works either way.
+STREAM=0; command -v jq >/dev/null && STREAM=1
+RUN_ID=$(date '+%Y%m%dT%H%M%S')
+run_claude() {  # $1 log (the reply the driver parses), $2 model, $3 prompt
+  local raw="$1"; [ "$STREAM" = 1 ] && raw="${1%.log}.jsonl"
+  if [ "$STREAM" = 1 ]; then
+    "$CLAUDE_BIN" -p "$3" --dangerously-skip-permissions --model "$2" --output-format stream-json --verbose >"$raw" 2>&1 & local pid=$!
+  else
+    "$CLAUDE_BIN" -p "$3" --dangerously-skip-permissions --model "$2" >"$raw" 2>&1 & local pid=$!
+  fi
+  ( sleep "$ROUND_TIMEOUT"; kill "$pid" 2>/dev/null && echo "TIMEOUT after ${ROUND_TIMEOUT}s" >>"$raw" ) & local wd=$!
+  wait "$pid" 2>/dev/null; kill "$wd" 2>/dev/null; wait "$wd" 2>/dev/null
+  [ "$STREAM" = 1 ] && reply_text "$raw" >"$1"; return 0; }
+# The reply = the transcript's final `result`; for a killed round, a crash, or a plain-text
+# CLAUDE_BIN there is none, so keep every line that is not a JSON event (incl. the TIMEOUT line).
+reply_text() {
+  local r; r=$(jq -rR 'fromjson? | select(.type == "result") | .result // empty' "$1" 2>/dev/null)
+  if [ -n "$r" ]; then printf '%s\n' "$r"; else grep -v '^{' "$1"; fi; return 0; }
+record_gates() {  # $1 log, $2 kind, $3 round, $4 outcome line, $5 commit (only when HEAD moved)
+  [ "$STREAM" = 1 ] || return 0
+  local n; n=$("$ROOT/scripts/gate-log.sh" "${1%.log}.jsonl" "$RUN_ID" "$2" "$3" "${4:-}" "${5:-}" 2>/dev/null)
+  [ "${n:-0}" -gt 0 ] 2>/dev/null && say "    gates recorded: $n -> .loop/gates.jsonl"; return 0; }
 
 # --- gate 0: never on the live branch (re-run every round) ---------------------------------
 check_branch() {
@@ -97,6 +120,7 @@ run_audit() {   # $1 = round number for the log name
   run_claude "$alog" "$LOOP_MODEL" "Spawn the state-auditor subagent (.claude/agents/state-auditor.md) to audit this repository and the running product from scratch and REWRITE $STATE. Report its final AUDIT: line verbatim as your last line."
   local A; A=$(resline "$alog" AUDIT); say "    ${A:-<no AUDIT line>}"
   emit audit "round#=$1" "verdict=$(verdict "$alog" AUDIT)" "line=$A"
+  record_gates "$alog" audit "$1" "$A"
   [ "$(verdict "$alog" AUDIT)" = "BROKEN" ] && { maint_flag=1; say "    state BROKEN — next round forced MAINTENANCE"; }; return 0; }
 
 # --- node P (autonomous): two senior agents must agree -------------------------------------
@@ -107,6 +131,7 @@ run_autonomous_positioning() {   # returns 0 if positioning changed (continue), 
   run_claude "$plog" "$POSITIONING_MODEL" "Run the autonomous mode of .claude/commands/position.md: spawn strategist, then positioning-critic on its proposal; apply to SOFT fields of $POSITIONING only if the critic returns AGREED; mirror soft fields into loop.config.env. End with the POSITION: line verbatim."
   local P; P=$(resline "$plog" POSITION); say "    ${P:-<no POSITION line>}"
   emit position "round#=$1" "verdict=$(verdict "$plog" POSITION)" "line=$P"
+  record_gates "$plog" position "$1" "$P"
   if [ "$(verdict "$plog" POSITION)" = "AGREED" ]; then auto_pos=$((auto_pos+1)); return 0; fi
   return 1; }
 
@@ -117,6 +142,7 @@ run_traj() {   # $1 round, $2 why → sets STOP / reset_flag from the TRAJ line
   run_claude "$tlog" "$LOOP_MODEL" "Spawn the trajectory-monitor subagent (.claude/agents/trajectory-monitor.md) over the last $TRAJ_EVERY commits, judged against $POSITIONING. Report its TRAJ: line verbatim as your last line."
   local T; T=$(resline "$tlog" TRAJ); say "    ${T:-<no TRAJ line>}"
   emit traj "round#=$1" "verdict=$(verdict "$tlog" TRAJ)" "line=$T" "why=$2"
+  record_gates "$tlog" traj "$1" "$T"
   case "$(verdict "$tlog" TRAJ)" in
     STOP)     STOP="trajectory monitor halted the run (round $1)" ;;
     REDIRECT) reset_flag=1 ;;
@@ -167,6 +193,8 @@ while [ "$i" -lt "$N" ]; do
   if [ "$V" = "SHIPPED" ] && [ "$(git rev-parse HEAD)" = "$head_before" ]; then
     say "     claimed SHIPPED but HEAD did not move — counting as NOOP"; V="NOOP"
   fi
+  moved=""; [ "$(git rev-parse HEAD)" != "$head_before" ] && moved=$(git rev-parse HEAD)
+  record_gates "$log" round "$i" "$RES" "$moved"
 
   case "$V" in
     SHIPPED)

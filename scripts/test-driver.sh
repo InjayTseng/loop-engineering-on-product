@@ -128,4 +128,41 @@ jev_case "10b" "AUDIT: HEALTHY\nLOOP_RESULT: SHIPPED | category=a | step=s | rej
 expect "jev same-tactic: JEV: UNAVAILABLE"
 expect_not "trajectory check"
 
+echo "### 11 stream-json transcript: reply parsed from .result; gate decisions recorded with evidence"
+if command -v jq >/dev/null; then
+  # Shape copied from a real `claude -p --output-format stream-json --verbose` run: the orchestrator's
+  # Agent tool_use, the subagent's own tool call/result (tagged parent_tool_use_id), the hand-back
+  # (top-level tool_use_result), a stderr line, then the final result.
+  cat > "$T/bin/claude-stream" <<'S'
+#!/usr/bin/env bash
+cat <<'J'
+{"type":"assistant","message":{"content":[{"type":"tool_use","id":"toolu_A","name":"Agent","input":{"subagent_type":"value-critic","prompt":"idea: share button on result page"}}]}}
+{"type":"assistant","parent_tool_use_id":"toolu_A","subagent_type":"value-critic","message":{"content":[{"type":"tool_use","id":"toolu_B","name":"Grep","input":{"pattern":"share"}}]}}
+{"type":"user","parent_tool_use_id":"toolu_A","subagent_type":"value-critic","message":{"content":[{"type":"tool_result","tool_use_id":"toolu_B","content":"no matches"}]},"tool_use_result":{"stdout":"no matches"}}
+{"type":"user","message":{"content":[{"type":"tool_result","tool_use_id":"toolu_A","content":[{"type":"text","text":"[Subagent hand-back] framed copy"}]}]},"tool_use_result":{"status":"completed","prompt":"idea: share button on result page","agentType":"value-critic","content":[{"type":"text","text":"SCORES: impact=4 novelty=3 effort_fit=4\n`VALUE: ACCEPT`"}],"resolvedModel":"claude-sonnet-5","totalTokens":1200,"totalDurationMs":900,"totalToolUseCount":1}}
+J
+echo "Warning: some stderr line"
+echo x >> shipped.txt; git add shipped.txt; git -c user.name=t -c user.email=t@t commit -qm "loop: stub ship"
+echo '{"type":"result","subtype":"success","is_error":false,"result":"built it\nLOOP_RESULT: SHIPPED | category=virality | step=share | rejects=0"}'
+S
+  chmod +x "$T/bin/claude-stream"; rm -rf .loop
+  env CLAUDE_BIN="$T/bin/claude-stream" SKIP_START_AUDIT=1 scripts/run-loop.sh 1 >/dev/null 2>&1
+  expect "-> LOOP_RESULT: SHIPPED \| category=virality"
+  expect "gates recorded: 1"
+  [ -s .loop/round-001.jsonl ] && echo "  ok   full transcript kept" || { echo "  FAIL transcript"; FAIL=1; }
+  head_sha=$(git rev-parse HEAD)
+  jq -e --arg h "$head_sha" 'select(.agent == "value-critic" and .kind == "round" and .round == 1
+      and .verdict == {key: "VALUE", token: "ACCEPT"} and (.report | test("impact=4"))
+      and .prompt == "idea: share button on result page"
+      and .evidence == [{tool: "Grep", input: "{\"pattern\":\"share\"}", output: "no matches"}]
+      and (.outcome | startswith("LOOP_RESULT: SHIPPED")) and .commit == $h)' .loop/gates.jsonl >/dev/null \
+    && echo "  ok   gate record: verdict, report, prompt, evidence, outcome, commit" \
+    || { echo "  FAIL gate record"; cat .loop/gates.jsonl; FAIL=1; }
+  # a second run appends (the dataset is cumulative across runs), never truncates
+  env CLAUDE_BIN="$T/bin/claude-stream" SKIP_START_AUDIT=1 scripts/run-loop.sh 1 >/dev/null 2>&1
+  [ "$(wc -l < .loop/gates.jsonl | tr -d ' ')" = 2 ] && echo "  ok   gates.jsonl accumulates across runs" || { echo "  FAIL accumulate"; FAIL=1; }
+else
+  echo "  skip (jq not installed — driver falls back to plain text)"
+fi
+
 [ "$FAIL" = 0 ] && echo "ALL DRIVER TESTS PASSED" || { echo "DRIVER TESTS FAILED"; exit 1; }

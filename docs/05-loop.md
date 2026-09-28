@@ -72,6 +72,24 @@ kill $(cat .loop/run.pid)               # 停
 
 `--dangerously-skip-permissions` 是 headless 的必要條件（headless 模式不讀 `settings.local.json` 的白名單）；它能被接受的唯一原因是分支隔離——每輪重查分支、`pre-push` hook、只 push loop——loop 分支上壞掉的東西不會到 live。
 
+## gate 紀錄：`.loop/gates.jsonl`
+
+driver 只 parse 每個節點的一行（`VALUE:`、`VERDICT:`、`TRAJ:`…）。以前 gate 的分數、理由、它自己查了什麼，跑完就丟了，連 `examples/` 兩次真實 run 都只剩 6 行判決。
+
+有 jq 的機器上，每次 `claude -p` 都用 `--output-format stream-json` 跑，完整 transcript 存成 `.loop/round-NNN.jsonl`（driver 照舊從最後的 `result` 還原 `round-NNN.log` 來 parse）。`scripts/gate-log.sh` 把裡面**每一次子 agent 交回的判決**追加一筆到 `.loop/gates.jsonl`：
+
+| 欄位 | 內容 |
+|---|---|
+| `agent` · `kind` · `round` · `run` | 誰判的、在哪個節點（round / audit / traj / position）、第幾輪、哪次 run |
+| `prompt` | orchestrator 交給 gate 的內容（被判的點子、CLAIM） |
+| `report` · `verdict` | gate 的完整回覆，以及跟 driver 同一規則 parse 出的判決；格式壞掉時是 `null`，不是整筆丟掉 |
+| `evidence` | gate 自己的每個 tool call 與輸出（每筆截到 `GATE_EVIDENCE_CHARS`，預設 4000 字） |
+| `outcome` · `commit` | 這一輪最後怎麼了；HEAD 有前進才有 commit |
+
+這是**跨 run 累積**的檔案：`round-NNN.*` 下一次 run 會被覆蓋，`gates.jsonl` 不會，所以每筆紀錄都自帶證據，不靠外部檔案。它是之後校準 gate 的資料集，例如把某個 gate 的最後裁決換成 typed-decision 模型之前，先拿它的門檻跟這裡 LLM gate 的實際判決比對。它在 `.loop/` 底下，所以不會 commit：裡面有尚未出貨的產品點子，要公開前自己篩。
+
+沒有 jq 時這整段自動關閉，driver 退回純文字模式照跑。
+
 ## 安全
 
 - driver 每輪開頭都檢查分支：不在 `LOOP_BRANCH` 就 REFUSE；`scripts/install-hooks.sh` 裝 `pre-push` hook 在 git 層拒推 live 分支；SHIPPED 只在 HEAD 真的前進時才算數
