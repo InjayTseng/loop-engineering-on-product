@@ -229,7 +229,9 @@ export function buildState(root, opts = {}) {
   const runEvents = startIdx >= 0 ? events.slice(startIdx) : events;
 
   const running = !replay && pidAlive(root);
-  const parkedFile = replay ? "" : read(join(root, ".loop", "state")).trim();
+  // .loop/state also records a USAGE_LIMIT stop; only WAITING_FOR_P means "parked, positioning needs a human"
+  const stateFile = replay ? "" : read(join(root, ".loop", "state")).trim();
+  const parkedFile = /^WAITING_FOR_P:/.test(stateFile) ? stateFile : "";
   const last = runEvents[runEvents.length - 1];
   const park = [...runEvents].reverse().find((e) => e.type === "park");
   const stop = [...runEvents].reverse().find((e) => e.type === "stop");

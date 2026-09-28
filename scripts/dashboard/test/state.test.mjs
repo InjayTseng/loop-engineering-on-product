@@ -2,7 +2,7 @@
 // Usage: node scripts/dashboard/test/state.test.mjs        (exit 0 = all pass; no dependencies)
 import { spawn } from "node:child_process";
 import { get } from "node:http";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -20,7 +20,9 @@ const eq = (name, got, want) => {
 const tmp = () => mkdtempSync(join(tmpdir(), "loop-dash-"));
 
 console.log("### replay: examples/web-v2-20-rounds (numbers from its README)");
-{
+// examples/ is not part of what an adopting repo copies (docs/08-adopt.md), so the replay only runs here.
+if (!existsSync(join(REPO, "examples/web-v2-20-rounds/loop.log"))) console.log("  skip (no examples/ in this repo — the replay needs the framework checkout)");
+else {
   const s = buildState(REPO, { loopLog: "examples/web-v2-20-rounds/loop.log", ledger: "examples/web-v2-20-rounds/as-run/_backlog.md" });
   eq("20 rounds, all shipped", [s.rounds.length, s.rounds.filter((r) => r.verdict === "SHIPPED").length], [20, 20]);
   eq("17 rejected ideas", s.rounds.reduce((a, r) => a + r.rejects, 0), 17);
@@ -68,6 +70,19 @@ console.log("### stop meters mirror scripts/run-loop.sh");
   eq("consecutive counters", stopMeters([end("REJECTED", 3), end("NOOP", 0), end("NOOP", 0)], cfg).slice(1).map((m) => m.value), [1, 2, 0]);
   eq("maintenance ships count; a feature ship resets", stopMeters([end("SHIPPED", 0, "maintenance"), end("SHIPPED", 0, "maintenance")], cfg)[3].value, 2);
   eq("autonomous positioning AGREED resets everything", stopMeters([end("REJECTED", 3), { type: "position", verdict: "AGREED" }], cfg).map((m) => m.value), [0, 0, 0, 0]);
+}
+
+console.log("### a usage-limit stop is a stop, not a park");
+{
+  const d = tmp(); mkdirSync(join(d, ".loop"), { recursive: true });
+  writeFileSync(join(d, ".loop", "events.jsonl"), [{ type: "run_start", ts: "2026-09-28T10:00:00Z", n: 12 }, { type: "round_start", ts: "2026-09-28T10:00:01Z", round: 10 },
+    { type: "stop", ts: "2026-09-28T10:00:02Z", round: 10, reason: "usage limit: You've hit your session limit · resets 12:30am" }].map((e) => JSON.stringify(e)).join("\n") + "\n");
+  writeFileSync(join(d, ".loop", "state"), "USAGE_LIMIT: You've hit your session limit · resets 12:30am\n");
+  const s = buildState(d, {});
+  eq("status stopped, reason from the stop event, no parked reason", [s.run.status, s.run.stopReason.startsWith("usage limit"), s.run.parkedReason], ["stopped", true, ""]);
+  writeFileSync(join(d, ".loop", "state"), "WAITING_FOR_P: value plateau\n");
+  eq("WAITING_FOR_P still means parked", [buildState(d, {}).run.status, buildState(d, {}).run.parkedReason], ["parked", "value plateau"]);
+  rmSync(d, { recursive: true, force: true });
 }
 
 console.log("### current activity and log parsing");

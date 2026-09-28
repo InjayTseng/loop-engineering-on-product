@@ -325,4 +325,41 @@ jev_case "17d the MAX_NOOP stop fires first; Jev is not asked" "LOOP_RESULT: NOO
 expect "STOP: 1 consecutive build/validate failures"
 [ -s "$T/jcalls.txt" ] && { echo "  FAIL Jev asked after the structural stop"; FAIL=1; } || echo "  ok   Jev not asked"
 
+echo "### 18 usage/session limit: never a NOOP; stop with its own reason, or wait and re-run the same call"
+# The first $LIMIT_N calls answer exactly like the CLI at its limit (the whole reply is the notice); later
+# calls ship normally. LONG=1 makes a normal, long reply that merely mentions a session limit.
+cat > "$T/bin/claude-limit" <<'S'
+#!/usr/bin/env bash
+n=$(cat "$LIMIT_COUNT" 2>/dev/null || echo 0); echo $((n+1)) > "$LIMIT_COUNT"
+if [ "$n" -lt "${LIMIT_N:-0}" ]; then echo "You've hit your session limit · resets 12:30am (Asia/Taipei)"; exit 1; fi
+case "$*" in *state-auditor*) echo "AUDIT: HEALTHY"; exit 0;; esac
+[ "${LONG:-0}" = 1 ] && { for k in $(seq 1 30); do echo "Implemented the per-user session limit banner: when users hit your session limit the app now explains it ($k)."; done; }
+echo x >> shipped.txt; git add shipped.txt; git -c user.name=t -c user.email=t@t commit -qm "loop: stub ship"
+echo "LOOP_RESULT: SHIPPED | category=a | step=s | rejects=0"
+S
+chmod +x "$T/bin/claude-limit"
+limit_case() { echo 0 > "$T/lcount"; rm -rf .loop; env CLAUDE_BIN="$T/bin/claude-limit" LIMIT_COUNT="$T/lcount" "$@" scripts/run-loop.sh 3 >/dev/null 2>&1; }
+limit_case LIMIT_N=99 SKIP_START_AUDIT=1
+expect "usage limit: You've hit your session limit · resets 12:30am"
+expect "STOP: usage limit — You've hit your session limit"
+expect_not "noop/no-result"
+expect_not "ROUND 2/3"
+grep -q '^USAGE_LIMIT: ' .loop/state && echo "  ok   .loop/state records USAGE_LIMIT" || { echo "  FAIL state file"; FAIL=1; }
+limit_case LIMIT_N=1 SKIP_START_AUDIT=1 LIMIT_WAIT=1 LIMIT_MAX_WAIT=5
+expect "waiting 1s, then running the same call again"
+expect "shipped: .* loop: stub ship"
+expect_not "STOP: usage limit"
+limit_case LIMIT_N=99 SKIP_START_AUDIT=1 LIMIT_WAIT=1 LIMIT_MAX_WAIT=1
+expect "waiting 1s"
+expect "STOP: usage limit"
+expect_not "noop/no-result"
+limit_case LIMIT_N=0 SKIP_START_AUDIT=1 LONG=1
+expect_not "usage limit"
+expect "shipped: .* loop: stub ship"
+limit_case LIMIT_N=99
+expect "STOP: usage limit"
+expect_not "ROUND 1/3"
+out=$(env CLAUDE_BIN="$T/bin/claude-limit" LIMIT_WAIT=abc scripts/run-loop.sh 1 2>&1 | head -1)
+case "$out" in REFUSE:*LIMIT_WAIT*) echo "  ok   invalid LIMIT_WAIT refused";; *) echo "  FAIL LIMIT_WAIT validation: $out"; FAIL=1;; esac
+
 [ "$FAIL" = 0 ] && echo "ALL DRIVER TESTS PASSED" || { echo "DRIVER TESTS FAILED"; exit 1; }

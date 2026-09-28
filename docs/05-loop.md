@@ -34,10 +34,13 @@ Fresh context every round: a broken round does not contaminate the next, context
 | Trajectory STOP | trajectory-monitor returns STOP | The loop is optimizing something other than the north star | P |
 | Structural failure | `MAX_NOOP` rounds in a row fail build/validate | The adapter or the product is broken — not a value problem | exit; fix the tooling |
 | Cap | `ROUNDS` or budget | One night's worth | exit |
+| Usage limit | the CLI's reply is only its limit notice ("You've hit your session limit · resets …") | Not a product or harness failure — **never counted as a NOOP** | `LIMIT_WAIT=off` (default): exit with `.loop/state` = `USAGE_LIMIT: …`; `LIMIT_WAIT=<s>`: wait and re-run the same call, up to `LIMIT_MAX_WAIT` |
 
 **The v2 → v2.1 fix.** v2's plateau only fired on "2 fully REJECTED rounds in a row". In the 20-round web-v2 run the value gate rejected 17 ideas inside rounds (0–2 per round; retries always found one that passed), and a fully REJECTED round never happened — so the plateau never fired. v2.1 reads the rolling rejection rate from `rejects=N` instead. That is why every `LOOP_RESULT` line must carry `rejects=`, 0 included.
 
 **Test the driver with a stub.** `scripts/run-loop.sh` consumes only the result lines `CLAUDE_BIN` prints, so a fake `claude` that prints one scripted line per call can run full scenarios (plateau fires, a RESET round is rejected again, autonomous positioning AGREES and the run continues, BROKEN forces maintenance, the main branch is refused). That is how the v2.1 plateau was found to be unable to fire at all (lesson 10). `bash scripts/test-driver.sh` runs 15 such scenarios; CI (`.github/workflows/test.yml`) runs them with the dashboard and Jev tests and shellcheck.
+
+**A usage limit is not a structural failure.** Found on a live run: three rounds hit the session limit, each reply was only the CLI's notice, and the driver counted three NOOPs and stopped as "structural — fix the adapter". Only a *short* reply that matches the notice counts as a limit, since a normal round can mention limits in product text. After a limit stop, rerun the driver after the reset: an unfinished round resumes from the ledger's `[IN_PROGRESS]` in Step 0.
 
 **RESET and REDIRECT are different instructions.** A round fully rejected by the value gate makes the next round a RESET: "not here — pick a different stage and category". A trajectory `REDIRECT` names where to go instead, so the driver passes the monitor's whole `TRAJ:` line into the next round's prompt as a REDIRECT ROUND. It steers one round; later rounds follow the gates again. (Found on a live run: the generic reset note let a round pick "something different" and skip the stage the monitor had named.)
 

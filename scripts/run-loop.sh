@@ -41,7 +41,7 @@ ROOT="$(cd "$(dirname "$0")/.." && pwd)"; cd "$ROOT"
 CONFIG="${CONFIG:-loop.config.env}"
 [ -f "$CONFIG" ] || { echo "REFUSE: $CONFIG not found. Copy and fill loop.config.env first."; exit 1; }
 # Environment overrides beat the config file (documented usage: LOOP_MODEL=... scripts/run-loop.sh).
-OVERRIDABLE="ROUNDS LOOP_MODEL POSITIONING_MODEL LOOP_BRANCH DEPLOY_BRANCH WINDOW PLATEAU_REJ PLATEAU_SHIP MAX_CONSEC_REJECTED MAX_NOOP MAX_CONSEC_MAINT TRAJ_EVERY AUDIT_EVERY AUTONOMOUS_POSITIONING MAX_AUTO_POSITIONING LOOP_SPEC POSITIONING STATE ROUND_TIMEOUT JEV_MODE JEV_REJECT_P PROTECTED_PATHS GATE_VALUE_AGENT GATE_VALIDATOR_AGENT"
+OVERRIDABLE="ROUNDS LOOP_MODEL POSITIONING_MODEL LOOP_BRANCH DEPLOY_BRANCH WINDOW PLATEAU_REJ PLATEAU_SHIP MAX_CONSEC_REJECTED MAX_NOOP MAX_CONSEC_MAINT TRAJ_EVERY AUDIT_EVERY AUTONOMOUS_POSITIONING MAX_AUTO_POSITIONING LOOP_SPEC POSITIONING STATE ROUND_TIMEOUT JEV_MODE JEV_REJECT_P PROTECTED_PATHS GATE_VALUE_AGENT GATE_VALIDATOR_AGENT LIMIT_WAIT LIMIT_MAX_WAIT"
 for v in $OVERRIDABLE; do eval "_env_$v=\${$v-__unset__}"; done
 # shellcheck disable=SC1090
 set -a; . "$CONFIG"; set +a
@@ -59,6 +59,11 @@ AUTONOMOUS_POSITIONING="${AUTONOMOUS_POSITIONING:-false}"; MAX_AUTO_POSITIONING=
 LOOP_SPEC="${LOOP_SPEC:-.claude/tasks/innovation_loop.md}"
 POSITIONING="${POSITIONING:-product/positioning.md}"; STATE="${STATE:-product/state.md}"
 ROUND_TIMEOUT="${ROUND_TIMEOUT:-1800}"
+# A usage/session limit is not a failure of the product or the harness: never count it as a NOOP.
+# LIMIT_WAIT=off stops the run with a USAGE_LIMIT reason; LIMIT_WAIT=<seconds> waits and runs the same call
+# again, until LIMIT_MAX_WAIT seconds of waiting in total.
+LIMIT_WAIT="${LIMIT_WAIT:-off}"; LIMIT_MAX_WAIT="${LIMIT_MAX_WAIT:-28800}"
+case "$LIMIT_WAIT" in off|*[!0-9]*) [ "$LIMIT_WAIT" = off ] || { echo "REFUSE: LIMIT_WAIT must be off or a number of seconds (got '$LIMIT_WAIT')."; exit 1; } ;; esac
 # What a round may never change: its own judges, the harness, and the objective (node P owns positioning).
 # Only the loop's own files under scripts/ — the product this is copied into may keep its code there too.
 LOOP_SCRIPTS="scripts/run-loop.sh scripts/gate-log.sh scripts/loop-event.sh scripts/install-hooks.sh scripts/test-driver.sh scripts/adapters scripts/jev scripts/dashboard"
@@ -89,7 +94,7 @@ verdict() {  # $1 file, $2 key → first UPPERCASE token after "KEY:" (e.g. AGRE
 # decisions can be recorded; without it, fall back to plain text — the driver works either way.
 STREAM=0; command -v jq >/dev/null && STREAM=1
 RUN_ID=$(date '+%Y%m%dT%H%M%S'); export LOOP_RUN_ID="$RUN_ID"   # Jev rows carry it: shadow-report joins them to gates.jsonl
-run_claude() {  # $1 log (the reply the driver parses), $2 model, $3 prompt
+run_claude_once() {  # $1 log (the reply the driver parses), $2 model, $3 prompt
   # Each call runs in its own process group (set -m), so a timeout — or the round simply ending —
   # also reaps what it spawned (subagents, browsers, simulators, dev servers). stdin is /dev/null:
   # a background process group that reads a terminal would be stopped by SIGTTIN.
@@ -116,6 +121,25 @@ run_claude() {  # $1 log (the reply the driver parses), $2 model, $3 prompt
 reply_text() {
   local r; r=$(jq -rR 'fromjson? | select(.type == "result") | .result // empty' "$1" 2>/dev/null)
   if [ -n "$r" ]; then printf '%s\n' "$r"; else grep -v '^{' "$1"; fi; return 0; }
+# The CLI's limit notice replaces the whole reply ("You've hit your session limit · resets 12:30am …").
+# Only a SHORT reply counts: a normal round may well mention limits in product text.
+limit_line() {  # $1 reply log → the limit message, or empty
+  [ -f "$1" ] && [ "$(wc -c < "$1" | tr -d ' ')" -lt 600 ] || return 0
+  grep -m1 -iE "hit your (session|usage|weekly|daily|monthly) limit|usage limit (reached|exceeded)|limit (will )?resets? (at|in) " "$1" | cut -c1-200; return 0; }
+LIMIT_LINE=""; limit_waited=0
+run_claude() {  # same arguments as run_claude_once; sets LIMIT_LINE when the call ended on a usage limit
+  while :; do
+    run_claude_once "$@"; LIMIT_LINE=$(limit_line "$1")
+    [ -n "$LIMIT_LINE" ] || return 0
+    say "  !! usage limit: $LIMIT_LINE"; emit limit "line=$LIMIT_LINE"
+    if [ "$LIMIT_WAIT" = off ] || [ $((limit_waited + LIMIT_WAIT)) -gt "$LIMIT_MAX_WAIT" ]; then return 0; fi
+    say "     waiting ${LIMIT_WAIT}s, then running the same call again (waited ${limit_waited}s of ${LIMIT_MAX_WAIT}s so far)"
+    sleep "$LIMIT_WAIT"; limit_waited=$((limit_waited + LIMIT_WAIT))
+  done; }
+stop_for_limit() {  # $1 round
+  echo "USAGE_LIMIT: $LIMIT_LINE" > "$LOGDIR/state"; emit stop "round#=$1" "reason=usage limit: $LIMIT_LINE"
+  say "=== STOP: usage limit — $LIMIT_LINE. Not a product or harness failure; no NOOP counted. Run scripts/run-loop.sh again after the reset: an unfinished round resumes from the ledger's [IN_PROGRESS] (Step 0). ==="; }
+
 record_gates() {  # $1 log, $2 kind, $3 round, $4 outcome line, $5 commit (only when HEAD moved)
   [ "$STREAM" = 1 ] || return 0
   local n; n=$("$ROOT/scripts/gate-log.sh" "${1%.log}.jsonl" "$RUN_ID" "$2" "$3" "${4:-}" "${5:-}" 2>/dev/null)
@@ -247,6 +271,7 @@ emit run_start "n#=$N" "pid#=$$" "branch=$LOOP_BRANCH" "model=$LOOP_MODEL" "jev=
   "window#=$WINDOW" "plateau_rej#=$PLATEAU_REJ" "plateau_ship#=$PLATEAU_SHIP" "max_consec_rejected#=$MAX_CONSEC_REJECTED" \
   "max_noop#=$MAX_NOOP" "max_consec_maint#=$MAX_CONSEC_MAINT" "traj_every#=$TRAJ_EVERY" "audit_every#=$AUDIT_EVERY"
 [ "${SKIP_START_AUDIT:-0}" = "1" ] || run_audit 0
+[ -n "$LIMIT_LINE" ] && { stop_for_limit 0; exit 0; }
 
 i=0
 while [ "$i" -lt "$N" ]; do
@@ -268,6 +293,7 @@ while [ "$i" -lt "$N" ]; do
   export LOOP_ROUND="$i"; emit round_start "round#=$i" "reset#=$reset_flag" "maint#=$maint_flag"
 
   run_claude "$log" "$LOOP_MODEL" "${note}Execute exactly ONE iteration of $LOOP_SPEC in this directory (git branch '$LOOP_BRANCH'). Read loop.config.env, $POSITIONING and $STATE first. Recently shipped categories (prefer a DIFFERENT one): ${recent:-none}. Rules: one small localized change; write a PRP every round; pass the value-critic gate (before building) AND the validator gate (after building, against the PRP) — both are independent subagents, never self-approve; commit and push origin $LOOP_BRANCH ONLY, never $DEPLOY_BRANCH. End your reply with the LOOP_RESULT line exactly as the spec defines it."
+  if [ -n "$LIMIT_LINE" ]; then emit round_end "round#=$i" "verdict=LIMIT" "rejects#=0"; stop_for_limit "$i"; break; fi
   maint_flag=0; redirect_line=""   # a redirect steers one round; later rounds follow the gates again
 
   RES=$(resline "$log" LOOP_RESULT); V=$(verdict "$log" LOOP_RESULT)
@@ -301,8 +327,9 @@ EOF
     fi
   fi
   if [ "$V" = "SHIPPED" ] && [ "$STREAM" = 1 ] && [ "$g_pass" = 1 ] && jev_claim_check "$i"; then
-    revalidate "$i" || { say "     re-validation did not PASS — counting as NOOP"; V="NOOP"; }
+    revalidate "$i" || [ -n "$LIMIT_LINE" ] || { say "     re-validation did not PASS — counting as NOOP"; V="NOOP"; }
   fi
+  if [ -n "$LIMIT_LINE" ]; then emit round_end "round#=$i" "verdict=LIMIT" "rejects#=$rj"; stop_for_limit "$i"; break; fi
 
   case "$V" in
     SHIPPED)
@@ -354,10 +381,12 @@ EOF
     if [ $((i % AUDIT_EVERY)) -eq 0 ]; then run_audit "$i"
     elif [ "$early_audit" = "1" ]; then run_audit "$i" "early: Jev traced the NOOP to the environment or adapter"; fi
   fi
+  [ -n "$LIMIT_LINE" ] && { stop_for_limit "$i"; break; }
   if [ -z "$STOP" ]; then
     if [ $((i % TRAJ_EVERY)) -eq 0 ]; then run_traj "$i" ""
     elif [ "$early_traj" = "1" ]; then run_traj "$i" "early: Jev flagged a repeated tactic"; fi
   fi
+  [ -n "$LIMIT_LINE" ] && { stop_for_limit "$i"; break; }
 
   # --- a value STOP hands control to node P --------------------------------------------------
   if [ -n "$STOP" ]; then
@@ -366,8 +395,11 @@ EOF
       say "    positioning re-aimed by strategist+critic (pending human review) — resuming from node C"
       consec_reject=0; consec_noop=0; consec_maint=0; reset_flag=1; REJWIN=(); SHIPWIN=()
       run_audit "$i"
+      [ -n "$LIMIT_LINE" ] && { stop_for_limit "$i"; break; }
       continue
     fi
+    # a positioning call cut short by a usage limit is not a DISAGREE: stop for the limit, don't park for P
+    [ -n "$LIMIT_LINE" ] && { stop_for_limit "$i"; break; }
     park_for_human "$STOP"; break
   fi
 done
