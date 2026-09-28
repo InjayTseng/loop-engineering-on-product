@@ -290,4 +290,21 @@ else
   echo "  skip (jq not installed — no gate records, so no claim-evidence check)"
 fi
 
+echo "### 17 JEV noop-cause: prefilter AUDIT_NOW pulls the state audit forward; NOOP counting and the MAX_NOOP stop are untouched"
+jev_case "17a prefilter AUDIT_NOW → early audit this round" "LOOP_RESULT: NOOP | rejects=0\nAUDIT: BROKEN — simulator will not boot\n" \
+  "JEV: AUDIT_NOW — cause=environment conf=0.90\n" 1 JEV_MODE=prefilter SKIP_START_AUDIT=1 AUDIT_EVERY=5
+expect "jev noop-cause: JEV: AUDIT_NOW"
+expect "state audit @ round 1 \(early: Jev traced the NOOP to the environment or adapter\)"
+expect "state BROKEN — next round forced MAINTENANCE"
+expect "noop/no-result \[consec=1/3\]"
+grep -q 'noop-cause --log .*round-001.log' "$T/jcalls.txt" && echo "  ok   Jev given this round's log" || { echo "  FAIL noop-cause args"; FAIL=1; }
+jev_case "17b shadow: logged, no audit" "LOOP_RESULT: NOOP | rejects=0\n" "JEV: SHADOW — would=AUDIT_NOW cause=environment\n" 1 JEV_MODE=shadow SKIP_START_AUDIT=1 AUDIT_EVERY=5
+expect "jev noop-cause: JEV: SHADOW"
+expect_not "state audit @"
+jev_case "17c NO_TRIGGER: no audit" "LOOP_RESULT: NOOP | rejects=0\n" "JEV: NO_TRIGGER — cause=implementation conf=0.95\n" 1 JEV_MODE=prefilter SKIP_START_AUDIT=1 AUDIT_EVERY=5
+expect_not "state audit @"
+jev_case "17d the MAX_NOOP stop fires first; Jev is not asked" "LOOP_RESULT: NOOP | rejects=0\n" "JEV: AUDIT_NOW — cause=environment conf=0.90\n" 1 JEV_MODE=prefilter SKIP_START_AUDIT=1 MAX_NOOP=1
+expect "STOP: 1 consecutive build/validate failures"
+[ -s "$T/jcalls.txt" ] && { echo "  FAIL Jev asked after the structural stop"; FAIL=1; } || echo "  ok   Jev not asked"
+
 [ "$FAIL" = 0 ] && echo "ALL DRIVER TESTS PASSED" || { echo "DRIVER TESTS FAILED"; exit 1; }

@@ -129,7 +129,7 @@ For this graph to run indefinitely without rotting, all nine conditions are requ
 | Y | git commands (fixed in the spec) | deterministic |
 | T | `.claude/agents/trajectory-monitor.md` | latent |
 | driver | `scripts/run-loop.sh` + `loop.config.env` | deterministic |
-| (optional) Jev pre-checks | `scripts/jev/jev.mjs`: before F, inside V, R's pick, the driver's early T trigger, and a re-validation trigger after V; can only fast-reject, never approve ([09-jev](09-jev.md)) | latent (a typed judgment, not generation), deterministic parse |
+| (optional) Jev pre-checks | `scripts/jev/jev.mjs`: before F, inside V, R's pick, the driver's early T trigger, a re-validation trigger after V, a retry check in the fix loops, and an early-audit trigger after a NOOP; can only fast-reject, never approve ([09-jev](09-jev.md)) | latent (a typed judgment, not generation), deterministic parse |
 
 Only the adapter (how B builds, observes, and decides "broken") changes per product; every other node, gate, back-edge and the protocol is reused as-is. Both adapters, iOS (a health app, external run, logs not included) and web (the v2 test site, logs in `examples/`), have run for real (N=2). That is the minimum before abstracting this layer.
 
@@ -147,7 +147,7 @@ TRAJ:        CONTINUE | REDIRECT | STOP
 LOOP_RESULT: SHIPPED | category=<c> | step=<s> | rejects=<N>
 LOOP_RESULT: REJECTED | rejects=<N>
 LOOP_RESULT: NOOP | rejects=<N>
-JEV:         OFF | SHADOW | PASS | ESCALATE | UNAVAILABLE | REJECT | SAME | DISTINCT | MISMATCH | PICK <key> | UNSUPPORTED | CONTRADICTED   (optional, 09-jev)
+JEV:         OFF | SHADOW | PASS | ESCALATE | UNAVAILABLE | REJECT | SAME | DISTINCT | MISMATCH | PICK <key> | UNSUPPORTED | CONTRADICTED | SAME_FAILURE | AUDIT_NOW | NO_TRIGGER   (optional, 09-jev)
 ```
 
 `rejects=N` is required on every line, 0 included. The driver computes the rolling rejection rate from it; without it plateau detection is blind. The real lesson from v2: watching only for "a fully rejected round", none of the 17 ideas rejected across 20 rounds produced a signal. Even under the v2.1 rejection-rate rule that data would not trigger; the plateau rule still has no real positive case (lessons 2 and 10).

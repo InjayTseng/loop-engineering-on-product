@@ -115,6 +115,37 @@ const ceLast = JSON.parse(readFileSync(LOG, "utf8").trim().split("\n").pop());
 expect("the shadow row is logged with task, backend=code and run/round", `${ceLast.task} ${ceLast.backend} ${ceLast.verdict} ${ceLast.input.run}/${ceLast.input.round}`, /^claim-evidence code UNSUPPORTED R9\/2$/);
 rmSync(ce, { recursive: true, force: true });
 
+console.log("### same-failure (in-round retry loops)");
+const sf = ["same-failure", "--loop", "build", "--attempt", "2", "--previous", "TS2339: Property 'x' does not exist", "--current", "TS2339: Property 'x' does not exist", "--edits", "renamed a comment"];
+const stuck = { same_cause: { answer: 0.95 }, material_change: { answer: 0.05 }, new_evidence: { answer: 0.04 } };
+expect("same cause, no real change, nothing new → SAME_FAILURE", run(sf, script(stuck)), /^JEV: SAME_FAILURE — .*costs one extra retry/);
+expect("a material change vetoes it", run(sf, script({ ...stuck, material_change: { answer: 0.9 } })), /^JEV: PASS — progress or a different failure/);
+expect("new evidence vetoes it", run(sf, script({ ...stuck, new_evidence: { answer: 0.9 } })), /^JEV: PASS/);
+expect("a flat same_cause is not enough", run(sf, script({ ...stuck, same_cause: { answer: 0.6 } })), /^JEV: (PASS|ESCALATE)/);
+expect("missing --current → ESCALATE", run(["same-failure", "--previous", "x"]), /^JEV: ESCALATE — need --previous and --current/);
+
+console.log("### noop-cause (a NOOP round → state audit now?)");
+const nc = mkdtempSync(join(tmpdir(), "jev-noop-"));
+const ncLog = join(nc, "round-004.log");
+writeFileSync(ncLog, "Build failed 3 times; reverted.\nLOOP_RESULT: NOOP | rejects=0\n");
+writeFileSync(join(nc, "round-004.jsonl"), [
+  { type: "assistant", message: { content: [{ type: "tool_use", id: "t1", name: "Bash", input: { command: "scripts/adapters/ios-shot.sh /tmp/s.png" } }] } },
+  { type: "user", message: { content: [{ type: "tool_result", tool_use_id: "t1", content: "Unable to boot device: iPhone 16 Pro" }] } },
+].map((e) => JSON.stringify(e)).join("\n") + "\n");
+const ncRun = (answer, conf, env = {}) => run(["noop-cause", "--log", ncLog], { ...script({ cause: { answer, confidence: conf } }), ...env });
+expect("environment above the bar → AUDIT_NOW", ncRun("environment", 0.9), /^JEV: AUDIT_NOW — cause=environment conf=0\.90/);
+expect("adapter above the bar → AUDIT_NOW", ncRun("adapter", 0.8), /^JEV: AUDIT_NOW — cause=adapter/);
+expect("environment below the bar → NO_TRIGGER", ncRun("environment", 0.6), /^JEV: NO_TRIGGER — cause=environment conf=0\.60/);
+expect("JEV_TRIGGER_CONF is honoured", ncRun("environment", 0.6, { JEV_TRIGGER_CONF: "0.5" }), /^JEV: AUDIT_NOW/);
+expect("implementation never triggers, however sure", ncRun("implementation", 0.99), /^JEV: NO_TRIGGER — cause=implementation/);
+expect("missing log → ESCALATE", run(["noop-cause", "--log", join(nc, "nope.log")]), /^JEV: ESCALATE — need --log/);
+// the unscripted mock hashes the state: different answers with and without the transcript prove the
+// real command outputs (not just the round's own summary) reach Jev
+const ncAnswers = () => { run(["noop-cause", "--log", ncLog]); return JSON.stringify(JSON.parse(readFileSync(LOG, "utf8").trim().split("\n").pop()).answers); };
+const withTranscript = ncAnswers(); rmSync(join(nc, "round-004.jsonl"));
+expect("the transcript's command outputs reach Jev's state", withTranscript === ncAnswers() ? "same" : "differs", /^differs$/);
+rmSync(nc, { recursive: true, force: true });
+
 console.log("### shadow-report (pairs shadow prefilter rows with value-critic verdicts)");
 run(idea, { JEV_MODE: "shadow", LOOP_RUN_ID: "R-test", LOOP_ROUND: "7", ...script(low) });
 const last = JSON.parse(readFileSync(LOG, "utf8").trim().split("\n").pop());
@@ -158,6 +189,17 @@ expect("claim flags: re-validation FAIL confirms, PASS is a false flag, shadow i
 expect("the false flag is listed", claimOut, /FALSE FLAG R1\/2: CONTRADICTED why/);
 expect("the shadow flag is listed for labelling", claimOut, /TO LABEL R1\/3: UNSUPPORTED/);
 expect("JEV_SHADOW stays the last line", lastLine(claimOut), /^JEV_SHADOW:/);
+// same-failure: the round's outcome labels the flag; noop-cause: the next audit of that run does
+const sfr = (round) => ({ task: "same-failure", mode: "shadow", run: "R1", round, verdict: "SAME_FAILURE", why: "same", input: { loop: "build", attempt: "2" } });
+const out1 = (round, shipped) => ({ agent: "value-critic", kind: "round", run: "R1", round, outcome: shipped ? "LOOP_RESULT: SHIPPED | category=a" : "LOOP_RESULT: NOOP | rejects=0", commit: shipped ? "abc" : null });
+const nr = (round) => ({ task: "noop-cause", mode: "prefilter", run: "R1", round, verdict: "AUDIT_NOW", why: "cause=environment" });
+const au = (round, token) => ({ agent: "state-auditor", kind: "audit", run: "R1", round, verdict: { key: "AUDIT", token } });
+const loopOut = report([sfr(1), sfr(2), sfr(3), nr(4), nr(6), nr(9)],
+  [out1(1, true), out1(2, false), au(4, "BROKEN"), au(7, "HEALTHY")]);
+expect("a same-failure flag in a round that still shipped is a false flag", loopOut, /JEV_RETRY: flagged=3 false_flags=1 consistent=1 unlabeled=1/);
+expect("the false retry flag is listed with its loop and attempt", loopOut, /FALSE FLAG R1\/1 \(build attempt 2\)/);
+expect("noop-cause: the next audit of the run labels the trigger", loopOut, /JEV_NOOP: triggers=3 confirmed=1 contradicted=1 unlabeled=1/);
+expect("JEV_SHADOW is still the last line", lastLine(loopOut), /^JEV_SHADOW:/);
 rmSync(rep, { recursive: true, force: true });
 
 console.log(fail ? "JEV TESTS FAILED" : "ALL JEV TESTS PASSED");

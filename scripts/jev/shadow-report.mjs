@@ -19,6 +19,11 @@
 // FAIL confirms the flag, a PASS makes it a false flag. Shadow flags have no re-validation and are
 // listed for a human to label. Summary line: JEV_CLAIM: checked=… flagged=… confirmed=… false_flags=… unlabeled=…
 //
+// same-failure (spec Step 7b): a flag in a round that still SHIPPED is a false flag — a later attempt
+// worked; a flag in a round that ended NOOP is consistent. JEV_RETRY: flagged=… false_flags=… consistent=…
+// noop-cause: an AUDIT_NOW is confirmed when the next state audit of that run says BROKEN and
+// contradicted when it says HEALTHY. JEV_NOOP: triggers=… confirmed=… contradicted=… unlabeled=…
+//
 // Usage: node scripts/jev/shadow-report.mjs [--jev .loop/jev.jsonl] [--gates .loop/gates.jsonl]
 // Last line: JEV_SHADOW: SAFE | UNSAFE | NO_DATA — pairs=N false_rejects=F caught=C/R
 //   SAFE = at least one pair and zero false rejects. Agreement with value-critic is not ground
@@ -87,6 +92,33 @@ if (claimRows.length) {
   for (const x of falseFlags) console.log(`  FALSE FLAG ${x.key}: ${x.r.why}`);
   for (const x of unlabeled) console.log(`  TO LABEL ${x.key}: ${x.r.verdict} — ${x.r.why}`);
 }
+// --- same-failure / noop-cause ------------------------------------------------------------------------
+const allGates = rows(GATES);
+const roundOutcome = (run, round) => {   // shipped = claimed SHIPPED and HEAD moved (the driver's own rule)
+  const g = allGates.filter((r) => r.run === run && r.round === round && r.kind === "round");
+  if (!g.length) return null;
+  return g.some((r) => /^LOOP_RESULT:\s*SHIPPED/.test(r.outcome || "") && r.commit) ? "SHIPPED" : "NOT_SHIPPED";
+};
+const jevRows = rows(JEV);
+const retryFlags = jevRows.filter((r) => r.task === "same-failure" && r.verdict === "SAME_FAILURE" && r.run && r.round != null)
+  .map((r) => ({ r, outcome: roundOutcome(r.run, Number(r.round)) }));
+const retryFalse = retryFlags.filter((x) => x.outcome === "SHIPPED");
+const retryOk = retryFlags.filter((x) => x.outcome === "NOT_SHIPPED");
+const audits = allGates.filter((r) => r.kind === "audit" && r.verdict?.key === "AUDIT");
+const noopTriggers = jevRows.filter((r) => r.task === "noop-cause" && r.verdict === "AUDIT_NOW" && r.run && r.round != null)
+  .map((r) => ({ r, audit: audits.filter((a) => a.run === r.run && a.round >= Number(r.round)).sort((x, y) => x.round - y.round)[0]?.verdict.token ?? null }));
+const noopConfirmed = noopTriggers.filter((x) => x.audit === "BROKEN"), noopWrong = noopTriggers.filter((x) => x.audit === "HEALTHY");
+if (retryFlags.length || noopTriggers.length) console.log("");
+if (retryFlags.length) {
+  console.log(`same-failure: flagged ${retryFlags.length}   false flags (round still shipped) ${retryFalse.length}   consistent (round gave up) ${retryOk.length}`);
+  for (const x of retryFalse) console.log(`  FALSE FLAG ${x.r.run}/${x.r.round} (${x.r.input?.loop ?? "?"} attempt ${x.r.input?.attempt ?? "?"}): ${x.r.why}`);
+}
+if (noopTriggers.length) {
+  console.log(`noop-cause: audit triggers ${noopTriggers.length}   confirmed (audit BROKEN) ${noopConfirmed.length}   contradicted (audit HEALTHY) ${noopWrong.length}`);
+  for (const x of noopWrong) console.log(`  CONTRADICTED ${x.r.run}/${x.r.round}: ${x.r.why}`);
+}
+console.log(`JEV_RETRY: flagged=${retryFlags.length} false_flags=${retryFalse.length} consistent=${retryOk.length} unlabeled=${retryFlags.length - retryFalse.length - retryOk.length}`);
+console.log(`JEV_NOOP: triggers=${noopTriggers.length} confirmed=${noopConfirmed.length} contradicted=${noopWrong.length} unlabeled=${noopTriggers.filter((x) => !x.audit).length}`);
 console.log(`JEV_CLAIM: checked=${claimRows.length} flagged=${flagged.length} confirmed=${confirmed.length} false_flags=${falseFlags.length} unlabeled=${unlabeled.length}`);
 
 const verdict = pairs.length === 0 ? "NO_DATA" : falseRejects.length ? "UNSAFE" : "SAFE";

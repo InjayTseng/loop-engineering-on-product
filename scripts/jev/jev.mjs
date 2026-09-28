@@ -13,6 +13,8 @@
 //   node scripts/jev/jev.mjs label-promise --label "<CTA label>" --observed "<what the handler did>"
 //   node scripts/jev/jev.mjs pick          --question "<q>" --option key="meaning" --option ...
 //   node scripts/jev/jev.mjs claim-evidence --run <LOOP_RUN_ID> --round <N>    (reads .loop/gates.jsonl)
+//   node scripts/jev/jev.mjs same-failure  --loop build|validate --attempt <n> --previous "<failure>" --current "<failure>" --edits "<changes between them>"
+//   node scripts/jev/jev.mjs noop-cause    --log .loop/round-NNN.log        (reads the reply and its .jsonl transcript)
 //
 // Env: JEV_MODE off|shadow|prefilter (default off) · JEV_REJECT_P (0.85) · JEV_TIMEOUT_MS (15000)
 //      backend: TYPESAFE_API_KEY | OPENROUTER_API_KEY | AI_GATEWAY_API_KEY | JEV_BACKEND=mock
@@ -191,8 +193,74 @@ function task(name, a, { check, pick }) {
         },
       };
     }
+    case "same-failure": {
+      // In-round retry loops (spec Step 6b / 7): is this attempt failing for the same reason as the last,
+      // with nothing material changed? Only ever costs ONE of the loop's existing retries; the loop's own
+      // cap still decides when a slice is abandoned. Material change or new evidence veto it.
+      if (!a.previous || !a.current) out("ESCALATE", "need --previous and --current");
+      return {
+        state: { loop: a.loop || "build", previous_failure: a.previous.slice(0, 6000), current_failure: a.current.slice(0, 6000), edits_between: (a.edits || "(none given)").slice(0, 6000) },
+        questions: {
+          same_cause: check("Is current_failure caused by the same root problem as previous_failure — the same failing check, error or missing behavior — even if the wording or line numbers differ?", {
+            true: "the same check fails for the same underlying reason",
+            false: "a different check fails, or the same check fails for a different reason",
+          }),
+          material_change: check("Do edits_between change something aimed at the cause shown in previous_failure, rather than cosmetic or unrelated edits?", {
+            true: "the edits target the cause of previous_failure",
+            false: "the edits are cosmetic, unrelated, or there are none",
+          }),
+          new_evidence: check("Does current_failure show something previous_failure did not — a different error, a later step reached, or a new clue about the cause?", {
+            true: "current_failure adds information or shows progress",
+            false: "current_failure repeats previous_failure with nothing new",
+          }),
+        },
+        decide: (ans) => (yes(ans.same_cause) && no(ans.material_change) && no(ans.new_evidence))
+          ? ["SAME_FAILURE", `same cause p=${ans.same_cause.answer.toFixed(2)}, no material change, nothing new; this attempt costs one extra retry`]
+          : passOrEscalate(ans, "progress or a different failure; retry as usual"),
+      };
+    }
+    case "noop-cause": {
+      // A round ended NOOP (build/validate gave up). Environment or adapter trouble means the next rounds
+      // will fail the same way, so the state audit should look NOW. The NOOP counters and the 3-NOOP stop
+      // are untouched; a low-confidence or "slice" answer triggers nothing.
+      const logPath = resolve(ROOT, a.log || "");
+      if (!a.log || !existsSync(logPath)) out("ESCALATE", "need --log pointing at a round log");
+      const reply = readFileSync(logPath, "utf8").slice(-3000);
+      const events = existsSync(logPath.replace(/\.log$/, ".jsonl")) ? readFileSync(logPath.replace(/\.log$/, ".jsonl"), "utf8").split("\n").flatMap((l) => { try { return l.trim() ? [JSON.parse(l)] : []; } catch { return []; } }) : [];
+      const calls = new Map(); const steps = [];
+      for (const e of events) {
+        if (e.parent_tool_use_id) continue;   // the round's own tools, not a subagent's
+        for (const c of e.message?.content || []) {
+          if (c.type === "tool_use") calls.set(c.id, { tool: c.name, input: JSON.stringify(c.input ?? {}).slice(0, 300) });
+          if (c.type === "tool_result" && calls.has(c.tool_use_id)) {
+            const text = typeof c.content === "string" ? c.content : (c.content || []).map((x) => x.text || "").join("\n");
+            steps.push({ ...calls.get(c.tool_use_id), output: text.slice(-1500) });
+          }
+        }
+      }
+      return {
+        state: { final_report: reply, last_commands: steps.slice(-8) },
+        questions: {
+          cause: pick("What made this round give up? Judge from last_commands (real outputs) first, final_report second.", {
+            environment: "the machine or services around the product: simulator not booted, missing tool or package, network, disk, credentials, a port in use",
+            adapter: "the build/observe script itself is broken: BUILD_CMD or the screenshot step errors the same way regardless of the change",
+            implementation: "the change the round wrote does not work: compile errors, failing tests or behavior caused by its own edits",
+            specification: "the PRD's CLAIM or success criteria could not be met or observed as written",
+            unclear: "the outputs do not show the cause",
+          }),
+        },
+        decide: (ans) => {
+          const c = ans.cause;
+          if (c.escalate) return ["ESCALATE", `Jev unsure (${c.reason}); nothing to trigger`];
+          const conf = Number(c.confidence || 0), min = Number(process.env.JEV_TRIGGER_CONF || 0.75);
+          return ["environment", "adapter"].includes(c.answer) && conf >= min
+            ? ["AUDIT_NOW", `cause=${c.answer} conf=${conf.toFixed(2)}; run the state audit now`]
+            : ["NO_TRIGGER", `cause=${c.answer} conf=${conf.toFixed(2)}`];
+        },
+      };
+    }
     default:
-      out("ESCALATE", `unknown task '${name}' (prefilter | same-tactic | label-promise | pick | claim-evidence)`);
+      out("ESCALATE", `unknown task '${name}' (prefilter | same-tactic | label-promise | pick | claim-evidence | same-failure | noop-cause)`);
   }
 }
 

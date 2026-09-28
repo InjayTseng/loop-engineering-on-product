@@ -36,7 +36,7 @@ scripts/loop-event.sh step <node> "<one line: what you are doing, naming the sli
 ```
 
 Use these nodes: Step 0 → `C` · Step 1 → `R` · Step 1b → `M` · Steps 2 / 2b / 3 → `F` · Step 4 → `S` ·
-Step 5 and 6b → `D` · Step 6 → `B` · Step 7 → `V` · Step 8 → `Y`. The command takes well under a
+Step 5 and 6b → `D` · Step 6 → `B` · Steps 7 / 7b → `V` · Step 8 → `Y`. The command takes well under a
 second and never fails the round. It is the only way anyone watching can see where a running
 round is, because the driver only learns the result when the round ends. It is not a result line,
 and no gate reads it.
@@ -130,6 +130,22 @@ touched CTA does what its label promises. Route on VERDICT:
 - `FAIL` with `BLOCKERS: PRD: …` → the spec is wrong: back to Step 4 once, then Step 5–7.
 - More than 3 validation failures for the same slice → revert, `[FAILED]`, `LOOP_RESULT: NOOP | rejects=<N>`.
 Paste the VERDICT block into the backlog entry.
+
+## Step 7b — Jev retry check (both fix loops; only when `JEV_MODE` is not `off`; docs/09-jev.md)
+After every attempt in Step 6b or Step 7, save its diff: `git diff > .loop/attempt-<build|validate>-<n>.diff`.
+From the SECOND failure in the same loop on, before retrying, run:
+```
+node scripts/jev/jev.mjs same-failure --loop <build|validate> --attempt <n> \
+  --previous "<the previous failure: last ~60 lines of the error, or the BLOCKERS>" \
+  --current  "<this failure, same form>" \
+  --edits    "$(diff .loop/attempt-<loop>-<n-1>.diff .loop/attempt-<loop>-<n>.diff | head -c 4000)"
+```
+- `JEV: SAME_FAILURE — <reason>` → this failure counts as TWO of the loop's 3. Write
+  `Jev same-failure: <reason>` into the backlog entry. If no attempt is left, give up exactly as the
+  step says (revert, `[FAILED]`, `NOOP`).
+- Any other line (`PASS`, `ESCALATE`, `UNAVAILABLE`, `SHADOW`, `OFF`) → retry as usual.
+Jev can only cost one extra attempt. It never ends the loop any other way, never skips Step 6 or
+Step 7, and a Step 7 re-run still spawns a fresh validator.
 
 ## Step 8 — Deploy (node Y)
 ```bash

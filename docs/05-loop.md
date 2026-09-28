@@ -14,6 +14,7 @@ for round in 1..N:
   update: category sequence, consecutive REJECTED, consecutive NOOP, rolling window
   record every gate decision → .loop/gates.jsonl        (with jq)
   JEV_MODE≠off and shipped → Jev claim-evidence check   (optional; prefilter UNSUPPORTED → fresh re-validation decides)
+  JEV_MODE≠off and NOOP    → Jev noop-cause check        (optional; prefilter AUDIT_NOW → state audit this round)
   JEV_MODE≠off and shipped → Jev same-tactic check      (optional; prefilter SAME → run T early)
   plateau? (see below)
   every AUDIT_EVERY rounds → C deep; every TRAJ_EVERY rounds → T (REDIRECT → next round RESET; STOP → stop)

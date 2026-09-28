@@ -77,6 +77,9 @@ console.log("### current activity and log parsing");
   eq("not running → nothing current", currentActivity([{ type: "round_start", round: 1 }], false), null);
   const inRound = [{ type: "round_start", round: 2 }, { type: "step", round: 2, node: "V", note: "validating" }, { type: "reval_start", round: 2 }];
   eq("Jev-triggered re-validation inside a round → node V", currentActivity(inRound, true)?.node, "V");
+  eq("an early audit's reason is parsed from loop.log", parseLoopLog("  · state audit @ round 3 (early: Jev traced the NOOP to the environment or adapter) -> /x/audit-003.log\n")
+    .filter((e) => e.type === "audit_start").map((e) => [e.round, e.why]), [[3, "early: Jev traced the NOOP to the environment or adapter"]]);
+  eq("a scheduled audit still parses, with no reason", parseLoopLog("  · state audit @ round 5 -> /x/audit-005.log\n").filter((e) => e.type === "audit_start").map((e) => [e.round, e.why]), [[5, ""]]);
   eq("after the re-validation the still-open round is current again", [currentActivity([...inRound, { type: "reval", round: 2 }], true)?.kind, currentActivity([...inRound, { type: "reval", round: 2 }], true)?.round], ["round", 2]);
   const ev = parseLoopLog("=== run-loop v3 START 2026-06-15 23:50:00 | N=2 model=sonnet branch=loop jev=off ===\n--- ROUND 1/2 @ 23:50:00 (reset=0 maint=0) -> x\n  -> LOOP_RESULT: REJECTED | rejects=3\n--- ROUND 2/2 @ 00:10:00 (reset=1 maint=0) -> x\n  -> <no LOOP_RESULT emitted>\n");
   const [a, b] = ev.filter((e) => e.type === "round_start");

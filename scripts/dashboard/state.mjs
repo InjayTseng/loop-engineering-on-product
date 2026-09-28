@@ -64,8 +64,8 @@ export function parseLoopLog(text) {
       lastEnd.commit = m[1]; lastEnd.subject = m[2];
     } else if (/claimed SHIPPED but HEAD did not move/.test(l) && lastEnd) {
       lastEnd.verdict = "NOOP";
-    } else if ((m = l.match(/^\s*· state audit @ round (\d+)/))) {
-      gateRound = +m[1]; ev.push({ type: "audit_start", round: +m[1] });
+    } else if ((m = l.match(/^\s*· state audit @ round (\d+)(?: \((.*)\))? ->/))) {
+      gateRound = +m[1]; ev.push({ type: "audit_start", round: +m[1], why: m[2] || "" });
     } else if ((m = l.match(/^\s*AUDIT:\s*([A-Z_]+)?/))) {
       ev.push({ type: "audit", round: gateRound, verdict: m[1] || "", line: l.trim() });
     } else if ((m = l.match(/^\s*· trajectory check @ round (\d+)(?: \((.*)\))?/))) {

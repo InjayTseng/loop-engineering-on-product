@@ -21,6 +21,8 @@ Every judgment in this graph lands on a gate, and a gate's output is already one
 | Inside V (validator 3b) | `label-promise`: does the observed behavior deliver what the label promises? | `JEV: MISMATCH` → axis 4 fails, listed as a blocker | Make axis 4 pass. Axis 4 still needs the validator's own evidence |
 | R's pick (`/research`) | `pick`: which of 2–4 candidates most likely moves the "next stage"? | `JEV: PICK <key>` → write that one first | Let it skip value-critic |
 | The driver, after every ship | `same-tactic`: is the newest commit the same tactic as the previous N? | `JEV: SAME` → run trajectory-monitor **early** this round | STOP or REDIRECT on its own. The decision is still trajectory-monitor's `TRAJ:` |
+| In-round retry loops (spec Step 7b) | `same-failure`: is this build / validation failure the same root cause as the last, with no material change and nothing new? | `JEV: SAME_FAILURE` → this failure counts as two of the loop's 3 attempts | End the loop any other way, or skip Step 6 / 7. A material change or new evidence vetoes the flag |
+| The driver, after a NOOP round | `noop-cause`: from the round's last real command outputs, is the cause the environment, the adapter, the implementation, the spec, or unclear? | `JEV: AUDIT_NOW` (environment / adapter, confidence ≥ `JEV_TRIGGER_CONF`, default 0.75) → run the state audit **this round** instead of at the next multiple of `AUDIT_EVERY` | Touch the NOOP counters or the `MAX_NOOP` stop. The audit decides whether the state is BROKEN |
 | The driver, after a validator PASS | `claim-evidence`: does anything the validator actually ran (its tool outputs in `.loop/gates.jsonl`) show the PRP's CLAIM holding — or contradict it? | `JEV: UNSUPPORTED` / `CONTRADICTED` → a **fresh, independent re-validation**; the round counts as shipped only if that validator returns PASS | Fail a round by itself, or approve one. The verdict that decides is the new validator's `VERDICT:` |
 
 Where Jev is not allowed: the driver's stop logic (it must stay deterministically testable with `test-driver.sh`, lesson 10), the final ACCEPT / PASS, and the positioning node P.
@@ -62,7 +64,7 @@ Slices a human has already approved (migrations, an agreed backlog) do not need 
 ```
 off        → never called (default)
 shadow     → called, written to .loop/jev.jsonl, prints `JEV: SHADOW — would=…`; nobody may route on this line
-prefilter  → fast-rejects and triggers take effect (REJECT / SAME / MISMATCH / PICK / UNSUPPORTED / CONTRADICTED); every other result means "go through the LLM gate as usual"
+prefilter  → fast-rejects and triggers take effect (REJECT / SAME / MISMATCH / PICK / UNSUPPORTED / CONTRADICTED / SAME_FAILURE / AUDIT_NOW); every other result means "go through the LLM gate as usual"
 ```
 
 `JEV_REJECT_P` (default 0.85): a result counts as a fast-reject only when P(yes) ≥ this value and Jev itself did not escalate. `MISMATCH` symmetrically requires P(delivers) ≤ 1 − this value.
@@ -75,7 +77,7 @@ prefilter  → fast-rejects and triggers take effect (REJECT / SAME / MISMATCH /
    - shipped but carrying a fabricated signal → a fast-reject catches an escape
    - any other ship → a fast-reject is a **false reject**
    Last line: `JEV_EVAL: SAFE` (0 false rejects), `UNSAFE`, `INCOMPLETE` (no key), or `MOCK` (the mock backend only checks the plumbing; its answers are hashes and do not count). The default data is `examples/web-v2-20-rounds/as-run/`: 45 COMPLETED entries (3 of them fabricated signals) and 18 REJECTED.
-3. **One night in shadow:** `JEV_MODE=shadow`. The next day run `node scripts/jev/shadow-report.mjs`. For `claim-evidence` it lists every shadow flag as `TO LABEL` — open that round's validator record and decide by hand whether the CLAIM was really observed; in prefilter mode the re-validation's verdict labels each flag automatically (`JEV_CLAIM: … confirmed=… false_flags=…`). For the prefilter, it pairs every shadow prefilter call with the value-critic verdict on the same idea (from `.loop/gates.jsonl`, which needs `jq` on the machine that ran the loop) and lists every **false reject** — an idea Jev would have rejected that value-critic accepted. Last line: `JEV_SHADOW: SAFE` (0 false rejects), `UNSAFE`, or `NO_DATA`. Without `gates.jsonl`, compare each `would=REJECT` in `.loop/jev.jsonl` with value-critic's verdict by hand.
+3. **One night in shadow:** `JEV_MODE=shadow`. The next day run `node scripts/jev/shadow-report.mjs`. For `claim-evidence` it lists every shadow flag as `TO LABEL` — open that round's validator record and decide by hand whether the CLAIM was really observed; in prefilter mode the re-validation's verdict labels each flag automatically (`JEV_CLAIM: … confirmed=… false_flags=…`). `same-failure` flags are labelled by the round's outcome — a round that still shipped proves a later attempt was worth making (`JEV_RETRY: … false_flags=…`) — and `noop-cause` triggers by the next state audit of the run (`JEV_NOOP: … confirmed=… contradicted=…`). For the prefilter, it pairs every shadow prefilter call with the value-critic verdict on the same idea (from `.loop/gates.jsonl`, which needs `jq` on the machine that ran the loop) and lists every **false reject** — an idea Jev would have rejected that value-critic accepted. Last line: `JEV_SHADOW: SAFE` (0 false rejects), `UNSAFE`, or `NO_DATA`. Without `gates.jsonl`, compare each `would=REJECT` in `.loop/jev.jsonl` with value-critic's verdict by hand.
 4. **prefilter:** switch only when both steps 2 and 3 show no false rejects. After every night, read the `Jev fast-reject` lines in the ledger.
 
 On the mock backend `eval-backlog.mjs` prints 20 false rejects (and a last line of `MOCK`, which never certifies SAFE). That is expected: it proves the eval really does block a judge that answers at random.
@@ -89,16 +91,19 @@ Agreement with value-critic in step 3 is not ground truth — value-critic can b
 | `scripts/jev/jev.mjs` | The four tasks (`prefilter` / `same-tactic` / `label-promise` / `pick`); always exits 0 and prints one `JEV:` line; every call is written to `.loop/jev.jsonl`, tagged with the driver's run and round |
 | `scripts/jev/ledger.mjs` | The ledger the prefilter sees: this idea's own entries removed (`[IN_PROGRESS]`, plus any not-yet-closed status that names it) |
 | `scripts/jev/eval-backlog.mjs` | Offline eval; last line `JEV_EVAL:` |
-| `scripts/jev/shadow-report.mjs` | Pairs shadow prefilter calls with value-critic verdicts from `.loop/gates.jsonl` (last line `JEV_SHADOW:`), and scores `claim-evidence` flags against re-validations (`JEV_CLAIM:`) |
+| `scripts/jev/shadow-report.mjs` | Pairs shadow prefilter calls with value-critic verdicts from `.loop/gates.jsonl` (last line `JEV_SHADOW:`), and scores `claim-evidence` flags against re-validations (`JEV_CLAIM:`), `same-failure` flags against round outcomes (`JEV_RETRY:`), and `noop-cause` triggers against the next audit (`JEV_NOOP:`) |
 | `scripts/jev/test/jev.test.mjs` | `npm test`: pins every answer with `JEV_BACKEND=mock` + `JEV_MOCK_SCRIPT` and checks every routing rule, plus the shadow report's pairing |
-| `scripts/test-driver.sh` scenarios 8–10, 16 | The driver side: a prefilter SAME runs T early; shadow does nothing even on SAME; off never calls Jev; UNAVAILABLE does nothing; a prefilter UNSUPPORTED/CONTRADICTED re-validates and only that verdict decides; shadow never re-validates |
-| `loop.config.env` | `JEV_MODE`, `JEV_REJECT_P` |
+| `scripts/test-driver.sh` scenarios 8–10, 16, 17 | The driver side: a prefilter SAME runs T early; shadow does nothing even on SAME; off never calls Jev; UNAVAILABLE does nothing; a prefilter UNSUPPORTED/CONTRADICTED re-validates and only that verdict decides; shadow never re-validates; a prefilter AUDIT_NOW after a NOOP runs the audit this round, and never after the MAX_NOOP stop has fired |
+| `.claude/tasks/innovation_loop.md` Step 7b | The round agent's retry check (`same-failure`) in both fix loops |
+| `loop.config.env` | `JEV_MODE`, `JEV_REJECT_P`; `JEV_TRIGGER_CONF` (environment variable, default 0.75) for `noop-cause` |
 
 ## Hypotheses to verify (come back and rewrite this section after a run)
 
 - Savings: under prefilter, the share of all rejections that are fast-rejects before the value gate, and the time saved per round.
 - Safety: whether false rejects on real runs are 0. A single false reject means going back to shadow or raising `JEV_REJECT_P`.
 - Early detection: how often a trajectory check triggered early by `SAME` returns REDIRECT/STOP (close to 0 = noise; turn that check off).
+- Retry check: of the `SAME_FAILURE` flags, how many were in rounds that still shipped. Any is a flag that would have cost a working attempt; several means go back to shadow or raise `JEV_REJECT_P`.
+- NOOP cause: of the `AUDIT_NOW` triggers, how many audits came back BROKEN. Mostly HEALTHY = each trigger buys an expensive audit for nothing; turn it off. The cause labels are the weak axis in the ecosystem (TokenTrim: error-type F1 23.7), which is why only a high-confidence environment/adapter answer triggers anything.
 - Claim evidence: of the `UNSUPPORTED` / `CONTRADICTED` flags, how many re-validations FAIL. Mostly PASS = the flag is noise that costs a validator run each time; go back to shadow. Also watch the `ESCALATE` share: web validators that only look at screenshots leave Jev nothing to read.
 
 Next: back to [00-pipeline](00-pipeline.md)

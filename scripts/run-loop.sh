@@ -164,9 +164,9 @@ done
 
 # --- node C: deep audit (fresh agent; rewrites product/state.md) ---------------------------
 maint_flag=0
-run_audit() {   # $1 = round number for the log name
+run_audit() {   # $1 = round number for the log name, $2 = why (optional)
   local alog="$LOGDIR/audit-$(pad "$1").log"
-  say "  · state audit @ round $1 -> $alog"; emit audit_start "round#=$1"
+  say "  · state audit @ round $1${2:+ ($2)} -> $alog"; emit audit_start "round#=$1" "why=${2:-}"
   run_claude "$alog" "$LOOP_MODEL" "Spawn the state-auditor subagent (.claude/agents/state-auditor.md) to audit this repository and the running product from scratch and REWRITE $STATE. Report its final AUDIT: line verbatim as your last line."
   local A; A=$(resline "$alog" AUDIT); say "    ${A:-<no AUDIT line>}"
   emit audit "round#=$1" "verdict=$(verdict "$alog" AUDIT)" "line=$A"
@@ -218,6 +218,14 @@ jev_claim_check() {   # $1 round → 0 = re-validate (prefilter + UNSUPPORTED / 
   [ "$JEV_MODE" = "prefilter" ] || return 1
   case "$(echo "$J" | sed -E 's/^[[:space:]]*JEV:[[:space:]]*([A-Z_]+).*/\1/')" in UNSUPPORTED|CONTRADICTED) return 0 ;; esac
   return 1; }
+# --- Jev noop-cause (optional): a NOOP round caused by the environment or the adapter will repeat,
+# so the state audit should look now rather than at the next multiple of AUDIT_EVERY. Only ever moves
+# the audit earlier; the NOOP counters and the MAX_NOOP stop are untouched.
+jev_noop_cause() {   # $1 round → 0 = audit now (prefilter + AUDIT_NOW)
+  [ "$JEV_MODE" = "off" ] && return 1
+  local J; J=$("$JEV_BIN" noop-cause --log "$LOGDIR/round-$(pad "$1").log" 2>/dev/null | tr -d '`' | grep -E '^[[:space:]]*JEV:' | tail -1)
+  say "  · jev noop-cause: ${J:-<no JEV line>}"; emit jev_noop "round#=$1" "line=$J"
+  [ "$JEV_MODE" = "prefilter" ] && [ "$(echo "$J" | sed -E 's/^[[:space:]]*JEV:[[:space:]]*([A-Z_]+).*/\1/')" = "AUDIT_NOW" ]; }
 revalidate() {   # $1 round → 0 when a fresh validator returns PASS
   local rlog="$LOGDIR/reval-$(pad "$1").log"
   say "  · re-validation @ round $1 (the validator's PASS is not backed by its own evidence) -> $rlog"; emit reval_start "round#=$1"
@@ -240,14 +248,14 @@ emit run_start "n#=$N" "pid#=$$" "branch=$LOOP_BRANCH" "model=$LOOP_MODEL" "jev=
 
 i=0
 while [ "$i" -lt "$N" ]; do
-  i=$((i+1)); STOP=""; early_traj=0
+  i=$((i+1)); STOP=""; early_traj=0; early_audit=0
   check_branch
   log="$LOGDIR/round-$(pad "$i").log"
   n=${#CATS[@]}; s=$(( n > 4 ? n - 4 : 0 )); recent="${CATS[*]:$s}"   # last 4, bash-3.2-safe
   note=""
   [ "$reset_flag" = "1" ] && note+="THIS IS A RESET ROUND: the value gate rejected recent ideas — deliberately pick a DIFFERENT funnel stage / category from the recent ones and think from scratch. "
   [ "$maint_flag" = "1" ] && note+="THIS IS A MAINTENANCE ROUND: $STATE reports BROKEN — fix what it lists, do not add features (Step 1b). "
-  [ "$JEV_MODE" != "off" ] && note+="JEV_MODE=$JEV_MODE: run the Jev pre-checks (spec Step 2b; validator step 3b) — they can only fast-reject; never skip an LLM gate on a Jev pass. "
+  [ "$JEV_MODE" != "off" ] && note+="JEV_MODE=$JEV_MODE: run the Jev pre-checks (spec Step 2b; validator step 3b; retry check Step 7b) — they can only fast-reject or cost one extra retry; never skip an LLM gate on a Jev pass. "
   say "--- ROUND $i/$N @ $(date '+%T') (reset=$reset_flag maint=$maint_flag) -> $log"
   head_before=$(git rev-parse HEAD); guard_before=$(protected_fp "$head_before")
   export LOOP_ROUND="$i"; emit round_start "round#=$i" "reset#=$reset_flag" "maint#=$maint_flag"
@@ -312,7 +320,8 @@ EOF
         emit round_end "round#=$i" "verdict=${V:-NOOP}" "rejects#=$rj"
         emit stop "round#=$i" "reason=$MAX_NOOP consecutive build/validate failures (structural)"
         break
-      fi ;;
+      fi
+      jev_noop_cause "$i" && early_audit=1 ;;
   esac
 
   if [ "$V" = "SHIPPED" ]; then
@@ -334,7 +343,10 @@ EOF
   fi
 
   # --- node C (deep) and node T, every K / N rounds ------------------------------------------
-  if [ -z "$STOP" ] && [ $((i % AUDIT_EVERY)) -eq 0 ]; then run_audit "$i"; fi
+  if [ -z "$STOP" ]; then
+    if [ $((i % AUDIT_EVERY)) -eq 0 ]; then run_audit "$i"
+    elif [ "$early_audit" = "1" ]; then run_audit "$i" "early: Jev traced the NOOP to the environment or adapter"; fi
+  fi
   if [ -z "$STOP" ]; then
     if [ $((i % TRAJ_EVERY)) -eq 0 ]; then run_traj "$i" ""
     elif [ "$early_traj" = "1" ]; then run_traj "$i" "early: Jev flagged a repeated tactic"; fi
