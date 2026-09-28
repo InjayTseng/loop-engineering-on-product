@@ -387,4 +387,58 @@ fi
 run_case "19b a NOOP that did not time out gets no timeout label" "LOOP_RESULT: NOOP | rejects=0\n" 1 SKIP_START_AUDIT=1
 expect "noop/no-result \[consec=1/3\]$"
 
+echo "### 20 a gate run with run_in_background is still recorded (its report arrives as a task_notification)"
+if command -v jq >/dev/null; then
+  # Shapes copied from a real transcript: a foreground value-critic (hand-back + a notification that must
+  # not duplicate it), a background validator (async_launched, its own tool calls, then the notification),
+  # and a background Bash task whose notification is not a gate. NOTIFY=0 drops the validator's report.
+  cat > "$T/bin/claude-bg" <<'S'
+#!/usr/bin/env bash
+cat <<'J'
+{"type":"assistant","message":{"content":[{"type":"tool_use","id":"toolu_C","name":"Agent","input":{"subagent_type":"value-critic","prompt":"idea"}}]}}
+{"type":"user","message":{"content":[{"type":"tool_result","tool_use_id":"toolu_C","content":[{"type":"text","text":"framed"}]}]},"tool_use_result":{"status":"completed","prompt":"idea","agentType":"value-critic","content":[{"type":"text","text":"VALUE: ACCEPT"}]}}
+{"type":"system","subtype":"task_notification","task_id":"a1","tool_use_id":"toolu_C","status":"completed","summary":"VALUE: ACCEPT"}
+{"type":"assistant","message":{"content":[{"type":"tool_use","id":"toolu_V","name":"Agent","input":{"subagent_type":"validator","prompt":"validate PRP x","run_in_background":true}}]}}
+{"type":"user","message":{"content":[{"type":"tool_result","tool_use_id":"toolu_V","content":"Async agent launched successfully"}]},"tool_use_result":{"isAsync":true,"status":"async_launched","agentId":"a2","resolvedModel":"claude-sonnet-5","prompt":"validate PRP x"}}
+{"type":"assistant","parent_tool_use_id":"toolu_V","message":{"content":[{"type":"tool_use","id":"toolu_B","name":"Bash","input":{"command":"scripts/adapters/web-check.mjs"}}]}}
+{"type":"user","parent_tool_use_id":"toolu_V","message":{"content":[{"type":"tool_result","tool_use_id":"toolu_B","content":"{\"ok\": true}"}]}}
+{"type":"system","subtype":"task_notification","task_id":"b9","tool_use_id":"toolu_X","status":"completed","summary":"npm test | tail"}
+J
+[ "${NOTIFY:-1}" = 1 ] && echo '{"type":"system","subtype":"task_notification","task_id":"a2","tool_use_id":"toolu_V","status":"completed","summary":"```\nVERDICT: PASS\nCLAIM: the button scrolls\n```"}'
+echo x >> shipped.txt; git add shipped.txt; git -c user.name=t -c user.email=t@t commit -qm "loop: stub ship"
+echo '{"type":"result","subtype":"success","result":"LOOP_RESULT: SHIPPED | category=a | step=s | rejects=0"}'
+S
+  chmod +x "$T/bin/claude-bg"
+  rm -rf .loop; env CLAUDE_BIN="$T/bin/claude-bg" SKIP_START_AUDIT=1 scripts/run-loop.sh 1 >/dev/null 2>&1
+  expect "gates recorded: 2 -> .loop/gates.jsonl"
+  expect_not "counting as NOOP"
+  expect "shipped: .* loop: stub ship"
+  jq -e -s 'length == 2 and (map(select(.agent == "validator" and .background == true and .verdict.token == "PASS"
+      and .prompt == "validate PRP x" and (.evidence | length) == 1)) | length) == 1
+      and (map(select(.agent == "value-critic" and .background == false)) | length) == 1' .loop/gates.jsonl >/dev/null \
+    && echo "  ok   background validator recorded once with its evidence; foreground value-critic not duplicated; Bash task ignored" \
+    || { echo "  FAIL background gate records"; cat .loop/gates.jsonl; FAIL=1; }
+  rm -rf .loop; env CLAUDE_BIN="$T/bin/claude-bg" SKIP_START_AUDIT=1 NOTIFY=0 scripts/run-loop.sh 1 >/dev/null 2>&1
+  expect "claimed SHIPPED but the last validator verdict is not PASS \(validator hand-backs=0; agents recorded: value-critic\)"
+  # order: a background validator FAILs first, a later foreground validator PASSes → the LAST verdict is PASS
+  cat > "$T/bin/claude-order" <<'S'
+#!/usr/bin/env bash
+cat <<'J'
+{"type":"user","message":{"content":[{"type":"tool_result","tool_use_id":"toolu_C","content":"x"}]},"tool_use_result":{"status":"completed","agentType":"value-critic","content":[{"type":"text","text":"VALUE: ACCEPT"}]}}
+{"type":"assistant","message":{"content":[{"type":"tool_use","id":"toolu_V1","name":"Agent","input":{"subagent_type":"validator","prompt":"v1","run_in_background":true}}]}}
+{"type":"system","subtype":"task_notification","tool_use_id":"toolu_V1","status":"completed","summary":"VERDICT: FAIL\nBLOCKERS: label mismatch"}
+{"type":"user","message":{"content":[{"type":"tool_result","tool_use_id":"toolu_V2","content":"x"}]},"tool_use_result":{"status":"completed","agentType":"validator","content":[{"type":"text","text":"VERDICT: PASS"}]}}
+J
+echo x >> shipped.txt; git add shipped.txt; git -c user.name=t -c user.email=t@t commit -qm "loop: stub ship"
+echo '{"type":"result","result":"LOOP_RESULT: SHIPPED | category=a | step=s | rejects=0"}'
+S
+  chmod +x "$T/bin/claude-order"; rm -rf .loop
+  env CLAUDE_BIN="$T/bin/claude-order" SKIP_START_AUDIT=1 scripts/run-loop.sh 1 >/dev/null 2>&1
+  expect_not "counting as NOOP"
+  [ "$(jq -r -s 'map(select(.agent == "validator") | .verdict.token) | join(",")' .loop/gates.jsonl)" = "FAIL,PASS" ] \
+    && echo "  ok   records keep transcript order (background FAIL, then foreground PASS)" || { echo "  FAIL record order"; FAIL=1; }
+else
+  echo "  skip (jq not installed)"
+fi
+
 [ "$FAIL" = 0 ] && echo "ALL DRIVER TESTS PASSED" || { echo "DRIVER TESTS FAILED"; exit 1; }

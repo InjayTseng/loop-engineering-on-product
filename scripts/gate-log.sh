@@ -6,8 +6,9 @@
 # data any future calibration is measured on (e.g. swapping a gate's final judgment for a typed-
 # decision model, then checking its thresholds against what the LLM gate actually decided).
 #
-# Input is a `claude -p --output-format stream-json --verbose` transcript. Every subagent hand-back
-# (a user event carrying `tool_use_result.agentType`) becomes one record: who judged, the prompt it
+# Input is a `claude -p --output-format stream-json --verbose` transcript. Every finished subagent becomes one
+# record — a foreground hand-back (a user event carrying `tool_use_result.agentType`), or, for an agent run
+# with run_in_background, the system `task_notification` that carries its report (`background: true`): who judged, the prompt it
 # was given, its full report, the parsed verdict, and every tool call it made with (truncated) output.
 # Records are self-contained on purpose: round-NNN.jsonl is overwritten by the next run, this file is not.
 #
@@ -29,30 +30,55 @@ recs=$(jq -R -s -c \
   def verdict_line: gsub("`"; "") | split("\n")
     | map(select(test("^\\s*(VALUE|VERDICT|TRAJ|AUDIT|POSITION):"))) | last;
   split("\n") | map(fromjson? // empty) as $ev
-  | $ev[]
-  | select(.type == "user" and (.tool_use_result | type) == "object" and .tool_use_result.agentType != null)
-  | ([.message.content[]? | select(.type == "tool_result") | .tool_use_id] | first) as $id
-  | .tool_use_result as $r
-  | ([$r.content[]? | select(.type == "text") | .text] | join("\n")) as $report
-  | ([$ev[] | select(.parent_tool_use_id == $id and .type == "user") | .message.content[]?
-       | select(.type == "tool_result") | {key: .tool_use_id, value: (.content | text | .[0:$cap])}]
-     | from_entries) as $out
-  | ($report | verdict_line) as $vl
-  | {
-      id: "\($run)/\($kind)-\($round)/\($id)",
-      run: $run, kind: $kind, round: ($round | tonumber), ts: (now | todate),
-      agent: $r.agentType, status: $r.status, model: $r.resolvedModel,
-      prompt: $r.prompt, report: $report,
-      verdict_line: $vl,
-      # a malformed line ("VALUE: ?") must yield null, not drop the whole record
-      verdict: (if $vl then ([$vl | capture("^\\s*(?<key>[A-Z_]+):\\s*(?<token>[A-Z_]+)")?] | first) else null end),
-      evidence: [$ev[] | select(.parent_tool_use_id == $id and .type == "assistant") | .message.content[]?
-                 | select(.type == "tool_use")
-                 | {tool: .name, input: (.input | tostring | .[0:$cap]), output: $out[.id]}],
-      tokens: $r.totalTokens, duration_ms: $r.totalDurationMs, tool_uses: $r.totalToolUseCount,
-      outcome: $outcome, commit: (if $commit == "" then null else $commit end),
-      source: $src
-    }' "$SRC" 2>/dev/null) || { echo 0; exit 0; }
+  # every Agent call in the transcript, by tool_use id (subagent type, prompt, foreground/background)
+  | ([$ev[] | select(.type == "assistant") | .message.content[]? | select(.type == "tool_use" and .name == "Agent")
+      | {key: .id, value: {type: .input.subagent_type, prompt: .input.prompt, bg: (.input.run_in_background == true)}}] | from_entries) as $agents
+  | ([$ev[] | select(.type == "user" and (.tool_use_result | type) == "object") | .tool_use_result as $r
+      | ([.message.content[]? | select(.type == "tool_result") | .tool_use_id] | first) as $id
+      | select($id != null) | {key: $id, value: $r}] | from_entries) as $results
+  | def record($pos; $id; $agent; $status; $model; $prompt; $report; $tokens; $dur; $uses; $bg):
+      ([$ev[] | select(.parent_tool_use_id == $id and .type == "user") | .message.content[]?
+         | select(.type == "tool_result") | {key: .tool_use_id, value: (.content | text | .[0:$cap])}]
+       | from_entries) as $out
+      | ($report | verdict_line) as $vl
+      | {
+          id: "\($run)/\($kind)-\($round)/\($id)",
+          run: $run, kind: $kind, round: ($round | tonumber), ts: (now | todate),
+          agent: $agent, status: $status, model: $model, background: $bg,
+          prompt: $prompt, report: $report,
+          verdict_line: $vl,
+          # a malformed line ("VALUE: ?") must yield null, not drop the whole record
+          verdict: (if $vl then ([$vl | capture("^\\s*(?<key>[A-Z_]+):\\s*(?<token>[A-Z_]+)")?] | first) else null end),
+          evidence: [$ev[] | select(.parent_tool_use_id == $id and .type == "assistant") | .message.content[]?
+                     | select(.type == "tool_use")
+                     | {tool: .name, input: (.input | tostring | .[0:$cap]), output: $out[.id]}],
+          tokens: $tokens, duration_ms: $dur, tool_uses: $uses,
+          outcome: $outcome, commit: (if $commit == "" then null else $commit end),
+          source: $src, _pos: $pos
+        };
+  # 1. foreground hand-backs: the tool_result carries the finished report (read event by event, so a
+  #    hand-back without a tool_result id still counts; it gets a positional id)
+  ([$ev | to_entries[] | .value as $e
+     | select($e.type == "user" and ($e.tool_use_result | type) == "object" and $e.tool_use_result.agentType != null
+              and $e.tool_use_result.status != "async_launched")
+     | {pos: .key, id: (([$e.message.content[]? | select(.type == "tool_result") | .tool_use_id] | first) // "handback-\(.key)"), r: $e.tool_use_result}]) as $hand
+  | ($hand | map(.id)) as $fg
+  # records come out in transcript order (the driver routes on the LAST validator verdict of a round)
+  | [ ($hand[] | .pos as $pos | .id as $id | .r as $r
+       | record($pos; $id; $r.agentType; $r.status; $r.resolvedModel; $r.prompt;
+                ([$r.content[]? | select(.type == "text") | .text] | join("\n"));
+                $r.totalTokens; $r.totalDurationMs; $r.totalToolUseCount; false)),
+  # 2. background agents (run_in_background): the tool_result only says "async_launched"; the report
+  #    arrives later as a system task_notification with the same tool_use_id. Without this, a gate run in
+  #    the background is invisible and a validated ship reads as "no validator PASS".
+      ([$ev | to_entries[] | .key as $pos | .value | select(.type == "system" and .subtype == "task_notification"
+          and ($agents[.tool_use_id // ""] != null) and ((.tool_use_id) as $t | $fg | index($t) | not)) | . + {_pos: $pos}]
+       | group_by(.tool_use_id) | map(last)[]
+       | .tool_use_id as $id | ._pos as $pos | $agents[$id] as $a | ($results[$id] // {}) as $r
+       | record($pos; $id; $a.type; .status; $r.resolvedModel; ($a.prompt // $r.prompt); (.summary // "");
+                .usage.total_tokens; .usage.duration_ms; .usage.tool_uses; true)) ]
+  | sort_by(._pos)[] | del(._pos)
+  ' "$SRC" 2>/dev/null) || { echo 0; exit 0; }
 
 [ -n "$recs" ] || { echo 0; exit 0; }
 printf '%s\n' "$recs" >> "$GATES"

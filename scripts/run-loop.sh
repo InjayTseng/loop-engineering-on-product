@@ -292,7 +292,7 @@ while [ "$i" -lt "$N" ]; do
   head_before=$(git rev-parse HEAD); guard_before=$(protected_fp "$head_before")
   export LOOP_ROUND="$i"; emit round_start "round#=$i" "reset#=$reset_flag" "maint#=$maint_flag"
 
-  run_claude "$log" "$LOOP_MODEL" "${note}Execute exactly ONE iteration of $LOOP_SPEC in this directory (git branch '$LOOP_BRANCH'). Read loop.config.env, $POSITIONING and $STATE first. Recently shipped categories (prefer a DIFFERENT one): ${recent:-none}. Rules: one small localized change; write a PRP every round; pass the value-critic gate (before building) AND the validator gate (after building, against the PRP) — both are independent subagents, never self-approve; commit and push origin $LOOP_BRANCH ONLY, never $DEPLOY_BRANCH. End your reply with the LOOP_RESULT line exactly as the spec defines it."
+  run_claude "$log" "$LOOP_MODEL" "${note}Execute exactly ONE iteration of $LOOP_SPEC in this directory (git branch '$LOOP_BRANCH'). Read loop.config.env, $POSITIONING and $STATE first. Recently shipped categories (prefer a DIFFERENT one): ${recent:-none}. Rules: one small localized change; write a PRP every round; pass the value-critic gate (before building) AND the validator gate (after building, against the PRP) — both are independent subagents run in the foreground (never run_in_background), never self-approve; commit and push origin $LOOP_BRANCH ONLY, never $DEPLOY_BRANCH. End your reply with the LOOP_RESULT line exactly as the spec defines it."
   if [ -n "$LIMIT_LINE" ]; then emit round_end "round#=$i" "verdict=LIMIT" "rejects#=0"; stop_for_limit "$i"; break; fi
   maint_flag=0; redirect_line=""   # a redirect steers one round; later rounds follow the gates again
 

@@ -23,6 +23,8 @@ honest change, starting from what the product actually is today.
 - Read `CLAUDE.md` (if present) and follow the codebase's existing patterns.
 - Value is judged BEFORE building (value-critic). Correctness is judged AFTER building
   (validator, against the PRD). Both are independent subagents. You never self-approve either.
+- Run both gates in the FOREGROUND (never `run_in_background`): you route on their verdict, so
+  you must have it before the next step. The same holds for any extra reviewer you add.
 - Hard fields of positioning (target user, problem, trust rules, non-goals) are not yours to
   change. If research contradicts them, write it in the brief and let the round end REJECTED.
 
@@ -98,7 +100,7 @@ entirely. Jev cannot change that decision, so asking it only adds false-reject r
 - Never show the `JEV:` line to value-critic. Its judgment must stay independent.
 
 ## Step 3 — VALUE GATE (node F; mandatory; independent)
-Spawn `value-critic` with: the idea, funnel stage, category, brief path. Count every idea it
+Spawn `value-critic` (foreground) with: the idea, funnel stage, category, brief path. Count every idea it
 rejects this round, including retries, plus every Jev fast-reject → `rejects=N` in LOOP_RESULT.
 - `VALUE: ACCEPT` → Step 4.
 - `VALUE: REJECT` → take its REDIRECT as the new angle, back to Step 1 (max 2 retries). Still
@@ -122,7 +124,7 @@ Read the error, fix, re-run Step 6. More than 3 failures → revert the touched 
 `[FAILED] — <reason>` in ledger and backlog, emit `LOOP_RESULT: NOOP | rejects=<N>`.
 
 ## Step 7 — VALIDATE PRD (node V; mandatory; never self-approve)
-Spawn `validator` with: the PRP path, the changed files, the baseline screenshot from Step 0.
+Spawn `validator` (foreground) with: the PRP path, the changed files, the baseline screenshot from Step 0.
 It verifies the product against the PRP's CLAIM and success criteria, including that every
 touched CTA does what its label promises. Route on VERDICT:
 - `PASS` → Step 8.
