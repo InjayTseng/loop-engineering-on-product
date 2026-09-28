@@ -147,11 +147,11 @@ export function stopMeters(events, cfg) {
   }
   const sumr = rej.reduce((a, b) => a + b, 0), sums = shp.reduce((a, b) => a + b, 0), full = shp.length >= W;
   return [
-    { key: "plateau", label: "拒絕率 plateau", detail: `近 ${shp.length}/${W} 輪：拒絕 ${sumr} 個點子、出貨 ${sums} 輪；${PR}×拒絕 ≥ ${PS}×出貨 時停`,
+    { key: "plateau", label: "Rejection-rate plateau", detail: `last ${shp.length}/${W} rounds: ${sumr} ideas rejected, ${sums} rounds shipped; stops when ${PR}×rejected ≥ ${PS}×shipped`,
       value: PR * sumr, limit: PS * Math.max(sums, 1), window: W, armed: full && sums > 0, fired: full && sums > 0 && PR * sumr >= PS * sums },
-    { key: "consec_reject", label: "連續整輪被拒", detail: "第 1 次強制 RESET，RESET 輪仍全拒就停", value: cr, limit: NUM(cfg.MAX_CONSEC_REJECTED, 2), armed: true, fired: cr >= NUM(cfg.MAX_CONSEC_REJECTED, 2) },
-    { key: "consec_noop", label: "連續 NOOP（建置／驗證放棄）", detail: "結構性問題，要人修 adapter 或產品", value: cn, limit: NUM(cfg.MAX_NOOP, 3), armed: true, fired: cn >= NUM(cfg.MAX_NOOP, 3) },
-    { key: "consec_maint", label: "連續維護輪", detail: "研究已乾，交回定位節點 P", value: cm, limit: NUM(cfg.MAX_CONSEC_MAINT, 3), armed: true, fired: cm >= NUM(cfg.MAX_CONSEC_MAINT, 3) },
+    { key: "consec_reject", label: "Consecutive fully rejected rounds", detail: "the 1st forces a RESET; stops if the RESET round is rejected too", value: cr, limit: NUM(cfg.MAX_CONSEC_REJECTED, 2), armed: true, fired: cr >= NUM(cfg.MAX_CONSEC_REJECTED, 2) },
+    { key: "consec_noop", label: "Consecutive NOOP (build/validation gave up)", detail: "structural problem: a human fixes the adapter or the product", value: cn, limit: NUM(cfg.MAX_NOOP, 3), armed: true, fired: cn >= NUM(cfg.MAX_NOOP, 3) },
+    { key: "consec_maint", label: "Consecutive maintenance rounds", detail: "research has run dry; hand back to positioning node P", value: cm, limit: NUM(cfg.MAX_CONSEC_MAINT, 3), armed: true, fired: cm >= NUM(cfg.MAX_CONSEC_MAINT, 3) },
   ];
 }
 
@@ -164,7 +164,7 @@ export function currentActivity(events, running) {
     if (open[e.type]) {
       const closed = events.slice(i + 1).some((x) => x.type === open[e.type]);
       if (!closed) return { kind: "gate", node: { audit_start: "C", traj_start: "T", position_start: "P" }[e.type],
-        label: { audit_start: "深度現況檢查（state-auditor）", traj_start: "軌跡檢查（trajectory-monitor）", position_start: "自主定位（strategist + critic）" }[e.type] + (e.why ? `：${e.why}` : ""),
+        label: { audit_start: "Deep state audit (state-auditor)", traj_start: "Trajectory check (trajectory-monitor)", position_start: "Autonomous positioning (strategist + critic)" }[e.type] + (e.why ? `: ${e.why}` : ""),
         round: e.round, since: e.ts };
       return null;
     }
@@ -173,7 +173,7 @@ export function currentActivity(events, running) {
       if (ended) return null;
       const steps = events.slice(i + 1).filter((x) => x.type === "step" && x.round === e.round);
       const last = steps[steps.length - 1];
-      return { kind: "round", round: e.round, node: last?.node || null, label: last?.note || "開始這一輪（尚未回報步驟）",
+      return { kind: "round", round: e.round, node: last?.node || null, label: last?.note || "round started (no step reported yet)",
         since: last?.ts || e.ts, roundSince: e.ts };
     }
     if (["round_end", "done", "stop", "park"].includes(e.type)) return null;

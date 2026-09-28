@@ -93,6 +93,19 @@ How to read it: yellow diamonds are **gates** — each judgment goes to an indep
 - **Optional: cheap fast-rejects that can never approve.** With `JEV_MODE=prefilter`, [TypeSafe's Jev](https://docs.typesafe.ai) — a model that returns typed yes/no and pick answers instead of text, in about 0.2 s — can fast-reject obvious bad ideas (fabricated signals, duplicates, non-goals) and flag broken label promises before an LLM gate spends a subagent on them. It can never approve anything: every pass still goes through the LLM gate. Rollout is off → shadow → prefilter, gated by an offline eval.
 - **Optional: watch it live.** `node scripts/dashboard/serve.mjs` serves a local, read-only page: run history, which node the current round is at, and how far each stop condition is from firing.
 
+## Watch it run
+
+`node scripts/dashboard/serve.mjs` opens a local, read-only dashboard at http://127.0.0.1:4400. It reads only the files the loop already writes and never steers it.
+
+![Loop dashboard, simulated run: round 4 is in D (develop) after a RESET; round 2 was fully rejected; in round 3 Jev flagged a repeated tactic and the early trajectory check returned REDIRECT](docs/img/dashboard-live.png)
+
+- **Now:** the round, the node on C→R→F→S→D→B→V→Y it has reached, and how long the step and the round have taken.
+- **History:** each round's result, with the number of ideas rejected inside it and the gate events (T / A / J / P).
+- **Stop conditions:** how far each of the driver's four stop thresholds is from firing, computed with the same rules as `scripts/run-loop.sh`.
+- **Ideas and Jev:** every idea in the ledger with its status, and the latest Jev calls.
+
+Past runs can be replayed from their `loop.log`. See [`docs/10-dashboard.md`](docs/10-dashboard.md).
+
 ## Evidence from real runs
 
 | Run | Setting | Rounds | What happened | What it changed |

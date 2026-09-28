@@ -1,9 +1,9 @@
 <!doctype html>
-<html lang="zh-Hant">
+<html lang="en">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Loop 儀表板</title>
+<title>Loop dashboard</title>
 <style>
 /* Tokens: status + accent steps from the validated dataviz palette; every status also carries an icon + label. */
 :root {
@@ -251,56 +251,56 @@ dialog pre { margin: 0; padding: 16px; overflow: auto; max-height: calc(100vh - 
 </defs></svg>
 <div class="wrap">
   <div class="bar">
-    <div class="brand"><div class="mark" aria-hidden="true">∞</div><div><h1>Loop 儀表板</h1><div class="prod" id="prod"></div></div></div>
-    <span id="pill" class="pill"><span class="dot"></span><span id="pillText">載入中…</span></span>
+    <div class="brand"><div class="mark" aria-hidden="true">∞</div><div><h1>Loop dashboard</h1><div class="prod" id="prod"></div></div></div>
+    <span id="pill" class="pill"><span class="dot"></span><span id="pillText">Loading…</span></span>
     <div class="chips" id="meta"></div>
     <span class="spacer"></span>
     <span class="upd" id="updated" aria-live="polite"></span>
-    <button class="ghost" id="theme" title="切換深淺色">主題：自動</button>
+    <button class="ghost" id="theme" title="Switch light / dark">Theme: auto</button>
   </div>
   <div id="banner"></div>
 
   <div class="grid">
     <div class="col">
       <section class="card now-card" aria-labelledby="h-now">
-        <h2 id="h-now">現在 <span class="sub" id="nowSub"></span></h2>
+        <h2 id="h-now">Now <span class="sub" id="nowSub"></span></h2>
         <div class="now-head">
           <div class="ringbox" id="ring"></div>
           <div class="activity" id="activity"></div>
         </div>
-        <div class="track-wrap" id="pipe" role="list" aria-label="這一輪的節點"></div>
+        <div class="track-wrap" id="pipe" role="list" aria-label="Nodes of this round"></div>
         <div class="kpis" id="kpis"></div>
       </section>
 
       <section class="card" aria-labelledby="h-hist">
-        <h2 id="h-hist">歷程 <span class="sub" id="histSub"></span>
-          <button class="ghost right" id="viewToggle" aria-pressed="false">表格檢視</button></h2>
+        <h2 id="h-hist">History <span class="sub" id="histSub"></span>
+          <button class="ghost right" id="viewToggle" aria-pressed="false">Table view</button></h2>
         <div id="strip" class="strip" role="list"></div>
         <div id="roundTable" class="scroll-x" hidden></div>
         <div class="legend">
-          <span><span class="sw" style="background:var(--good)"></span>✓ 出貨</span>
-          <span><span class="sw" style="background:var(--warning)"></span>✕ 整輪被拒</span>
+          <span><span class="sw" style="background:var(--good)"></span>✓ shipped</span>
+          <span><span class="sw" style="background:var(--warning)"></span>✕ fully rejected</span>
           <span><span class="sw" style="background:var(--critical)"></span>! NOOP</span>
-          <span><span class="sw" style="background:var(--accent)"></span>◌ 進行中</span>
-          <span><span class="sw" style="background:var(--warning);width:4px;height:12px"></span>柱高＝輪內被拒的點子數</span>
-          <span><span class="sw" style="background:var(--band);box-shadow:inset 0 0 0 1px var(--line-2)"></span>plateau 判斷視窗</span>
-          <span><span class="mkb">T</span> 軌跡 <span class="mkb">A</span> 現況 <span class="mkb">J</span> Jev <span class="mkb">P</span> 定位</span>
+          <span><span class="sw" style="background:var(--accent)"></span>◌ running</span>
+          <span><span class="sw" style="background:var(--warning);width:4px;height:12px"></span>bar height = ideas rejected in the round</span>
+          <span><span class="sw" style="background:var(--band);box-shadow:inset 0 0 0 1px var(--line-2)"></span>plateau window</span>
+          <span><span class="mkb">T</span> trajectory <span class="mkb">A</span> audit <span class="mkb">J</span> Jev <span class="mkb">P</span> positioning</span>
         </div>
       </section>
 
       <section class="card" aria-labelledby="h-round">
-        <h2 id="h-round">這一輪</h2>
-        <div id="roundBody" class="empty">點歷程裡的任一輪看細節。</div>
+        <h2 id="h-round">Round</h2>
+        <div id="roundBody" class="empty">Click any round in the history for details.</div>
       </section>
     </div>
 
     <div class="col">
       <section class="card" aria-labelledby="h-stop">
-        <h2 id="h-stop">停機條件 <span class="sub">與 driver 同一套算法，直線是門檻</span></h2>
+        <h2 id="h-stop">Stop conditions <span class="sub">same rules as the driver; the line is the threshold</span></h2>
         <div id="meters"></div>
       </section>
       <section class="card" aria-labelledby="h-ideas">
-        <h2 id="h-ideas">點子 <span class="sub" id="ledgerPath"></span></h2>
+        <h2 id="h-ideas">Ideas <span class="sub" id="ledgerPath"></span></h2>
         <div class="seg" id="ideaTabs" role="tablist"></div>
         <ul class="ideas" id="ideas"></ul>
       </section>
@@ -309,24 +309,24 @@ dialog pre { margin: 0; padding: 16px; overflow: auto; max-height: calc(100vh - 
         <div class="scroll-x" id="jev"></div>
       </section>
       <section class="card" aria-labelledby="h-docs" id="docsCard" hidden>
-        <h2 id="h-docs">文件</h2>
+        <h2 id="h-docs">Documents</h2>
         <div class="files" id="docs"></div>
       </section>
     </div>
   </div>
 </div>
 <div class="tip" id="tip" role="tooltip"></div>
-<dialog id="viewer"><div class="dh"><b id="viewerTitle"></b><span class="spacer"></span><button class="ghost" onclick="viewer.close()">關閉</button></div><pre id="viewerBody"></pre></dialog>
+<dialog id="viewer"><div class="dh"><b id="viewerTitle"></b><span class="spacer"></span><button class="ghost" onclick="viewer.close()">Close</button></div><pre id="viewerBody"></pre></dialog>
 
 <script>
 const $ = (id) => document.getElementById(id);
 const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
-const NODES = [["C", "現況"], ["R", "研究"], ["F", "價值閘"], ["S", "PRD"], ["D", "開發"], ["B", "建置"], ["V", "驗證"], ["Y", "出貨"]];
-const SIDE = [["T", "軌跡"], ["P", "定位"]];
+const NODES = [["C", "State"], ["R", "Research"], ["F", "Value gate"], ["S", "PRD"], ["D", "Develop"], ["B", "Build"], ["V", "Validate"], ["Y", "Ship"]];
+const SIDE = [["T", "Traj."], ["P", "Pos."]];
 const ICON = { SHIPPED: "✓", REJECTED: "✕", NOOP: "!", RUNNING: "◌" };
-const WORD = { SHIPPED: "出貨", REJECTED: "整輪被拒", NOOP: "NOOP", RUNNING: "進行中" };
-const STATUS = { running: "執行中", parked: "停下等人", done: "已完成", stopped: "已停止", idle: "尚未啟動" };
-const GATE = { traj: "軌跡", audit: "現況", jev_same: "Jev", position: "定位" };
+const WORD = { SHIPPED: "Shipped", REJECTED: "Fully rejected", NOOP: "NOOP", RUNNING: "Running" };
+const STATUS = { running: "Running", parked: "Waiting for a human", done: "Done", stopped: "Stopped", idle: "Not started" };
+const GATE = { traj: "Trajectory", audit: "Audit", jev_same: "Jev", position: "Positioning" };
 let S = null, selected = null, userPicked = false, ideaTab = "active", tabPicked = false, tableView = false;
 
 const dur = (ms) => {
@@ -334,7 +334,7 @@ const dur = (ms) => {
   const s = Math.round(ms / 1000), h = Math.floor(s / 3600), m = Math.floor((s % 3600) / 60), r = s % 60;
   return h ? `${h}h ${String(m).padStart(2, "0")}m` : m ? `${m}m ${String(r).padStart(2, "0")}s` : `${r}s`;
 };
-const time = (ts) => ts ? new Date(ts).toLocaleTimeString("zh-TW", { hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false }) : "";
+const time = (ts) => ts ? new Date(ts).toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false }) : "";
 const verdictOf = (r) => r.verdict || (S.current && S.current.round === r.n ? "RUNNING" : "");
 const roundEnd = (r, i) => r.end || S.rounds[i + 1]?.start || (verdictOf(r) === "RUNNING" ? S.generatedAt : i === S.rounds.length - 1 ? S.run.endedAt : null);
 const roundDur = (r, i) => { const e = roundEnd(r, i); return r.start && e ? new Date(e) - new Date(r.start) : NaN; };
@@ -346,14 +346,14 @@ let theme = "auto";
 try { theme = localStorage.getItem("loop-dash-theme") || "auto"; } catch {}
 const applyTheme = () => {
   if (theme === "auto") delete document.documentElement.dataset.theme; else document.documentElement.dataset.theme = theme;
-  $("theme").textContent = `主題：${{ auto: "自動", light: "淺色", dark: "深色" }[theme]}`;
+  $("theme").textContent = `Theme: ${theme}`;
 };
 $("theme").onclick = () => { theme = themes[(themes.indexOf(theme) + 1) % 3]; try { localStorage.setItem("loop-dash-theme", theme); } catch {} applyTheme(); };
 applyTheme();
 $("viewToggle").onclick = () => { tableView = !tableView; $("viewToggle").setAttribute("aria-pressed", tableView); renderHistory(); };
 
 async function openFile(path) {
-  $("viewerTitle").textContent = path; $("viewerBody").textContent = "載入中…"; $("viewer").showModal();
+  $("viewerTitle").textContent = path; $("viewerBody").textContent = "Loading…"; $("viewer").showModal();
   try { const r = await fetch(`/api/file?path=${encodeURIComponent(path)}`); $("viewerBody").textContent = await r.text(); }
   catch (e) { $("viewerBody").textContent = String(e); }
 }
@@ -362,17 +362,17 @@ document.addEventListener("click", (e) => { const a = e.target.closest("[data-fi
 // header
 function renderHeader() {
   const run = S.run;
-  $("prod").textContent = run.product || (S.replay ? "重播過去的 run" : "");
+  $("prod").textContent = run.product || (S.replay ? "Replaying a past run" : "");
   $("pill").className = `pill ${run.status}`;
   $("pillText").textContent = STATUS[run.status] || run.status;
   $("meta").innerHTML = [
-    run.branch && ["分支", run.branch], run.model && ["模型", run.model], run.jev && ["Jev", run.jev],
-    ["資料", S.source + (S.replay ? "（重播）" : "")],
+    run.branch && ["Branch", run.branch], run.model && ["Model", run.model], run.jev && ["Jev", run.jev],
+    ["Data", S.source + (S.replay ? " (replay)" : "")],
   ].filter(Boolean).map(([k, v]) => `<span class="kchip">${k} <b>${esc(v)}</b></span>`).join("");
-  $("updated").textContent = S.replay ? "" : `更新 ${time(S.generatedAt)}`;
+  $("updated").textContent = S.replay ? "" : `Updated ${time(S.generatedAt)}`;
   let b = "";
-  if (run.status === "parked") b = `<div class="banner parked"><span class="ic">⏸</span><div><b>停下來等人：</b>${esc(run.parkedReason || run.stopReason)}<br><span class="small muted">下一步：跑 <code>/position</code> 重新對準定位，再重跑 <code>scripts/run-loop.sh</code>。</span></div></div>`;
-  else if (run.status === "stopped") b = `<div class="banner stopped"><span class="ic">■</span><div>${run.stopReason ? `<b>已停止：</b>${esc(run.stopReason)}` : "<b>driver 沒有在跑</b>，最後也沒有正常結束（被 kill 或中斷）。下面是上一次的紀錄。"}</div></div>`;
+  if (run.status === "parked") b = `<div class="banner parked"><span class="ic">⏸</span><div><b>Waiting for a human:</b> ${esc(run.parkedReason || run.stopReason)}<br><span class="small muted">Next: run <code>/position</code> to re-align positioning, then rerun <code>scripts/run-loop.sh</code>.</span></div></div>`;
+  else if (run.status === "stopped") b = `<div class="banner stopped"><span class="ic">■</span><div>${run.stopReason ? `<b>Stopped:</b> ${esc(run.stopReason)}` : "<b>The driver is not running</b> and did not exit cleanly (killed or interrupted). Below is the last record."}</div></div>`;
   $("banner").innerHTML = b;
 }
 
@@ -384,24 +384,24 @@ function renderNow() {
   const C = 2 * Math.PI * 56, frac = Math.min(1, finishedRounds / N);
   $("ring").innerHTML = `<svg viewBox="0 0 132 132" aria-hidden="true"><circle class="trk" cx="66" cy="66" r="56" fill="none" stroke-width="10"/>
     <circle class="arc" cx="66" cy="66" r="56" fill="none" stroke-width="10" stroke-linecap="round" stroke-dasharray="${C}" stroke-dashoffset="${C * (1 - frac)}"/></svg>
-    <div class="num"><b>${shownN || "–"}</b><span>第幾輪 / 共 ${N}</span></div><span class="sr">已完成 ${finishedRounds} / ${N} 輪</span>`;
+    <div class="num"><b>${shownN || "–"}</b><span>round / of ${N}</span></div><span class="sr">${finishedRounds} of ${N} rounds finished</span>`;
 
   const r = rs.find((x) => x.n === shownN);
   if (cur) {
     const since = Date.now() - new Date(cur.since);
-    const nodeName = cur.node === "M" ? "維護" : (NODES.concat(SIDE).find(([k]) => k === cur.node) || [])[1] || "";
-    $("nowSub").textContent = cur.kind === "gate" ? "driver 正在跑檢查" : `第 ${cur.round} 輪進行中`;
-    $("activity").innerHTML = `<div class="eyebrow">${cur.node ? `<span class="nodechip">${esc(cur.node)}</span>${esc(nodeName)}` : "等待回報"}${cur.kind === "round" && r?.reset ? '<span class="tag">RESET</span>' : ""}</div>
+    const nodeName = cur.node === "M" ? "Maintenance" : (NODES.concat(SIDE).find(([k]) => k === cur.node) || [])[1] || "";
+    $("nowSub").textContent = cur.kind === "gate" ? "the driver is running a check" : `round ${cur.round} in progress`;
+    $("activity").innerHTML = `<div class="eyebrow">${cur.node ? `<span class="nodechip">${esc(cur.node)}</span>${esc(nodeName)}` : "waiting for a report"}${cur.kind === "round" && r?.reset ? '<span class="tag">RESET</span>' : ""}</div>
       <div class="what">${esc(cur.label)}</div>
-      <div class="timers"><span>這一步 <b>${dur(since)}</b></span>${cur.roundSince ? `<span>這一輪 <b>${dur(Date.now() - new Date(cur.roundSince))}</b></span>` : ""}</div>
-      ${cur.kind === "round" && !cur.node ? '<div class="note">round agent 還沒回報步驟（舊版 spec 不會回報，見 docs/10-dashboard.md）</div>' : ""}`;
+      <div class="timers"><span>this step <b>${dur(since)}</b></span>${cur.roundSince ? `<span>this round <b>${dur(Date.now() - new Date(cur.roundSince))}</b></span>` : ""}</div>
+      ${cur.kind === "round" && !cur.node ? '<div class="note">the round agent has not reported a step yet (older specs never do; see docs/10-dashboard.md)</div>' : ""}`;
   } else {
-    $("nowSub").textContent = S.run.status === "running" ? "輪與輪之間" : "目前沒有在跑";
+    $("nowSub").textContent = S.run.status === "running" ? "between rounds" : "not running";
     $("activity").innerHTML = lastR
-      ? `<div class="eyebrow">上一輪 · 第 ${lastR.n} 輪 <span class="status ${esc(lastR.verdict)}">${ICON[lastR.verdict] || ""} ${esc(WORD[lastR.verdict] || lastR.verdict || "")}</span></div>
+      ? `<div class="eyebrow">Last round · round ${lastR.n} <span class="status ${esc(lastR.verdict)}">${ICON[lastR.verdict] || ""} ${esc(WORD[lastR.verdict] || lastR.verdict || "")}</span></div>
          <div class="what">${esc(lastR.subject || lastR.category || "—")}</div>
-         ${S.run.startedAt ? `<div class="timers"><span>整個 run <b>${dur(new Date(S.run.endedAt || S.generatedAt) - new Date(S.run.startedAt))}</b></span></div>` : ""}`
-      : '<div class="what">還沒有任何一輪</div><div class="note">啟動：<code>scripts/run-loop.sh</code></div>';
+         ${S.run.startedAt ? `<div class="timers"><span>whole run <b>${dur(new Date(S.run.endedAt || S.generatedAt) - new Date(S.run.startedAt))}</b></span></div>` : ""}`
+      : '<div class="what">No rounds yet</div><div class="note">Start: <code>scripts/run-loop.sh</code></div>';
   }
 
   // rail: filled up to the furthest node reached in the shown round; the live segment flows
@@ -412,8 +412,8 @@ function renderNow() {
   const seg = 100 / (NODES.length - 1);
   const stop = ([k, n], i) => {
     const cls = k === nowNode ? "now" : finished || i < reach ? "done" : "";
-    const label = k === "R" && cur?.node === "M" ? "維護" : n;
-    return `<div class="stop ${cls}" role="listitem" aria-current="${k === nowNode}"><div class="b">${cls === "done" ? "✓" : k}</div><div class="l">${label}</div>${k === nowNode ? '<span class="sr">（目前）</span>' : ""}</div>`;
+    const label = k === "R" && cur?.node === "M" ? "Maint." : n;
+    return `<div class="stop ${cls}" role="listitem" aria-current="${k === nowNode}"><div class="b">${cls === "done" ? "✓" : k}</div><div class="l">${label}</div>${k === nowNode ? '<span class="sr"> (current)</span>' : ""}</div>`;
   };
   const gateNow = cur?.kind === "gate" ? cur.node : null;
   const side = ([k, n]) => {
@@ -431,19 +431,19 @@ function renderNow() {
   const fin = rs.map((x, i) => roundDur(x, i)).filter((d, i) => rs[i].verdict && d > 0);
   const avg = fin.length ? fin.reduce((a, b) => a + b, 0) / fin.length : NaN;
   $("kpis").innerHTML = [
-    ["var(--good)", "已出貨", shipped, `/ ${finishedRounds} 輪`],
-    ["var(--warning)", "被拒的點子", rejects, finishedRounds ? `${(rejects / finishedRounds).toFixed(1)}/輪` : ""],
+    ["var(--good)", "Shipped", shipped, `/ ${finishedRounds} rounds`],
+    ["var(--warning)", "Ideas rejected", rejects, finishedRounds ? `${(rejects / finishedRounds).toFixed(1)}/round` : ""],
     ["var(--critical)", "NOOP", rs.filter((x) => x.verdict === "NOOP").length, ""],
-    ["var(--accent)", "平均每輪", dur(avg), ""],
+    ["var(--accent)", "Avg per round", dur(avg), ""],
   ].map(([c, l, v, s]) => `<div class="kpi"><div class="l"><i style="background:${c}"></i>${l}</div><div class="v">${esc(v)}<small>${esc(s)}</small></div></div>`).join("");
 }
 
 // history
 function renderHistory() {
   const rs = S.rounds, W = S.meters.find((m) => m.key === "plateau")?.window || 5;
-  $("histSub").textContent = rs.length ? `${rs.length} 輪 · 出貨 ${rs.filter((r) => r.verdict === "SHIPPED").length}` : "";
+  $("histSub").textContent = rs.length ? `${rs.length} rounds · ${rs.filter((r) => r.verdict === "SHIPPED").length} shipped` : "";
   $("strip").hidden = tableView; $("roundTable").hidden = !tableView;
-  if (!rs.length) { $("strip").innerHTML = '<div class="empty">還沒有歷程。</div>'; return; }
+  if (!rs.length) { $("strip").innerHTML = '<div class="empty">No history yet.</div>'; return; }
   if (!tableView) {
     const atEnd = $("strip").scrollLeft + $("strip").clientWidth >= $("strip").scrollWidth - 4;
     const maxR = Math.max(1, ...rs.map((r) => r.rejects || 0));
@@ -453,12 +453,12 @@ function renderHistory() {
       const marks = r.gates.map((g) => `<span class="mkb ${gateClass(g.verdict)}">${{ traj: "T", audit: "A", jev_same: "J", position: "P" }[g.type]}</span>`).join("");
       return `<div class="rcol ${win.has(r.n) ? "inwin" : ""}" role="listitem">
         <div class="barcell" aria-hidden="true"><span class="bv">${r.rejects ? r.rejects : ""}</span><div class="bar" style="height:${h}px"></div><div class="base"></div></div>
-        <button class="tile s-${v}" data-round="${r.n}" aria-current="${selected === r.n}" aria-label="第 ${r.n} 輪：${WORD[v] || v}，被拒 ${r.rejects || 0} 個點子">
+        <button class="tile s-${v}" data-round="${r.n}" aria-current="${selected === r.n}" aria-label="Round ${r.n}: ${WORD[v] || v}, ${r.rejects || 0} ideas rejected">
           <span class="mk">${marks}</span><span class="no">${r.n}</span><span class="ic">${ICON[v] || "?"}</span></button></div>`;
     }).join("");
     if (atEnd) $("strip").scrollLeft = $("strip").scrollWidth;   // follow the newest round unless the user scrolled back
   } else {
-    $("roundTable").innerHTML = `<table><thead><tr><th>輪</th><th>結果</th><th>類別</th><th>漏斗</th><th class="num">被拒</th><th class="num">用時</th><th>出貨內容</th></tr></thead><tbody>${
+    $("roundTable").innerHTML = `<table><thead><tr><th>Round</th><th>Result</th><th>Category</th><th>Funnel</th><th class="num">Rejected</th><th class="num">Time</th><th>Shipped</th></tr></thead><tbody>${
       rs.map((r, i) => { const v = verdictOf(r) || "NOOP";
         return `<tr data-round="${r.n}" class="${selected === r.n ? "sel" : ""}"><td class="num">${r.n}</td><td><span class="status ${v}">${ICON[v] || ""} ${WORD[v] || v}</span></td>
         <td>${esc(r.category || "")}</td><td>${esc(r.step || "")}</td><td class="num">${r.rejects || 0}</td><td class="num">${dur(roundDur(r, i))}</td><td>${esc(r.subject || "")}</td></tr>`; }).join("")}</tbody></table>`;
@@ -468,29 +468,29 @@ function renderHistory() {
 // round detail
 function renderRound() {
   const i = S.rounds.findIndex((r) => r.n === selected), r = S.rounds[i];
-  if (!r) { $("roundBody").className = "empty"; $("roundBody").textContent = "點歷程裡的任一輪看細節。"; return; }
+  if (!r) { $("roundBody").className = "empty"; $("roundBody").textContent = "Click any round in the history for details."; return; }
   $("roundBody").className = "";
   const v = verdictOf(r) || "NOOP";
-  const flags = [r.reset ? "RESET" : "", r.maint ? "維護" : ""].filter(Boolean);
-  const facts = [["類別", r.category], ["漏斗", r.step], ["輪內被拒", `${r.rejects || 0} 個點子`], ["用時", dur(roundDur(r, i))],
-    ["開始", r.start ? new Date(r.start).toLocaleString("zh-TW", { hour12: false, month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit" }) : ""]].filter(([, x]) => x);
+  const flags = [r.reset ? "RESET" : "", r.maint ? "MAINT" : ""].filter(Boolean);
+  const facts = [["Category", r.category], ["Funnel", r.step], ["Rejected", `${r.rejects || 0} ideas`], ["Time", dur(roundDur(r, i))],
+    ["Started", r.start ? new Date(r.start).toLocaleString("en-US", { hour12: false, month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit" }) : ""]].filter(([, x]) => x);
   const spans = r.steps.map((s, j) => new Date(r.steps[j + 1]?.ts || roundEnd(r, i) || S.generatedAt) - new Date(s.ts));
   const maxSpan = Math.max(1, ...spans.filter((x) => x > 0));
   const steps = r.steps.length ? `<div class="steps">${r.steps.map((s, j) => {
       const isCur = S.current?.round === r.n && j === r.steps.length - 1;
       return `<div class="srow ${isCur ? "cur" : ""}"><div class="nd">${esc(s.node)}</div>
-        <div class="tx">${esc(s.note)}<span>${time(s.ts)} · ${dur(spans[j])}${isCur ? " · 進行中" : ""}</span></div>
+        <div class="tx">${esc(s.note)}<span>${time(s.ts)} · ${dur(spans[j])}${isCur ? " · running" : ""}</span></div>
         <div class="dbar" aria-hidden="true"><i style="width:${Math.max(0, (spans[j] / maxSpan) * 100)}%"></i></div></div>`;
-    }).join("")}</div>` : `<p class="small muted">這一輪沒有步驟紀錄${S.replay ? "（舊 run 的 log 沒有 step 事件）" : ""}。</p>`;
+    }).join("")}</div>` : `<p class="small muted">No steps recorded for this round${S.replay ? " (older run logs have no step events)" : ""}.</p>`;
   const gates = r.gates.length ? `<div class="sect">GATE</div><div class="gates">${r.gates.map((g) =>
     `<div class="gate"><span class="chip ${gateClass(g.verdict) || (["CONTINUE", "HEALTHY", "AGREED"].includes(g.verdict) ? "ok" : "")}">${esc(GATE[g.type])} ${esc(g.verdict)}</span>${esc((g.line || "").replace(/^\s*[A-Z]+:\s*[A-Z_]+\s*(—\s*)?/, ""))}</div>`).join("")}</div>` : "";
   const files = [...(r.files || []), ...(S.replay || !r.verdict ? [] : [`.loop/round-${String(r.n).padStart(3, "0")}.log`])];
-  $("roundBody").innerHTML = `<div class="rhead"><span class="rn">第 ${r.n} 輪</span><span class="status ${v}">${ICON[v] || ""} ${WORD[v] || v}</span>
+  $("roundBody").innerHTML = `<div class="rhead"><span class="rn">Round ${r.n}</span><span class="status ${v}">${ICON[v] || ""} ${WORD[v] || v}</span>
       ${flags.map((f) => `<span class="tag">${f}</span>`).join("")}</div>
     <div class="facts">${facts.map(([k, x]) => `<div class="fact"><div class="l">${k}</div><div class="v">${esc(x)}</div></div>`).join("")}</div>
     ${r.subject ? `<div class="shipline">${r.commit ? `<code>${esc(r.commit)}</code>` : ""}${esc(r.subject)}</div>` : ""}
-    <div class="sect">步驟</div>${steps}${gates}
-    ${files.length ? `<div class="sect">檔案</div><div class="files">${files.map((f) => `<a href="#" class="ghost" data-file="${esc(f)}">${esc(f.split("/").pop())}</a>`).join("")}</div>` : ""}`;
+    <div class="sect">Steps</div>${steps}${gates}
+    ${files.length ? `<div class="sect">Files</div><div class="files">${files.map((f) => `<a href="#" class="ghost" data-file="${esc(f)}">${esc(f.split("/").pop())}</a>`).join("")}</div>` : ""}`;
 }
 
 // meters: fill = current value, vertical tick = the threshold that stops the run
@@ -500,10 +500,10 @@ function renderMeters() {
     const pct = Math.min(100, (m.value / max) * 100), tick = Math.min(100, (m.limit / max) * 100);
     const ratio = m.limit ? m.value / m.limit : 0;
     const sev = !m.armed ? "" : m.fired || ratio >= 1 ? "c" : ratio >= 0.5 ? "w" : "";
-    const val = m.armed ? `<b>${m.value}</b> / ${m.limit}` : "視窗未滿";
+    const val = m.armed ? `<b>${m.value}</b> / ${m.limit}` : "window not full";
     return `<div class="meter ${m.armed ? "" : "off"}"><div class="top"><span>${m.fired ? "⚠ " : ""}${esc(m.label)}</span><span class="val">${val}</span></div>
       <div class="mtrack" role="meter" aria-valuemin="0" aria-valuemax="${m.limit}" aria-valuenow="${m.value}" aria-label="${esc(m.label)}">
-        ${m.armed && m.value > 0 ? `<div class="f ${sev}" style="width:${pct}%"></div>` : ""}<div class="tick" style="left:calc(${tick}% - 2px)" title="門檻"></div></div>
+        ${m.armed && m.value > 0 ? `<div class="f ${sev}" style="width:${pct}%"></div>` : ""}<div class="tick" style="left:calc(${tick}% - 2px)" title="threshold"></div></div>
       <div class="d">${esc(m.detail)}</div></div>`;
   }).join("");
 }
@@ -511,10 +511,10 @@ function renderMeters() {
 // ideas
 const TERMINAL = ["COMPLETED", "REJECTED", "FAILED", "LOW_IMPACT"];
 const GROUPS = [
-  ["active", "進行中", (i) => !TERMINAL.includes(i.status)],
-  ["done", "已完成", (i) => i.status === "COMPLETED"],
-  ["rejected", "已拒絕", (i) => i.status === "REJECTED"],
-  ["other", "失敗/低值", (i) => i.status === "FAILED" || i.status === "LOW_IMPACT"],
+  ["active", "Active", (i) => !TERMINAL.includes(i.status)],
+  ["done", "Done", (i) => i.status === "COMPLETED"],
+  ["rejected", "Rejected", (i) => i.status === "REJECTED"],
+  ["other", "Failed / low impact", (i) => i.status === "FAILED" || i.status === "LOW_IMPACT"],
 ];
 function renderIdeas() {
   if (!tabPicked) ideaTab = (GROUPS.find((g) => S.ideas.some(g[2])) || GROUPS[0])[0];
@@ -524,19 +524,19 @@ function renderIdeas() {
   const f = GROUPS.find((g) => g[0] === ideaTab)[2];
   const list = S.ideas.filter(f).reverse();
   $("ideas").innerHTML = list.length ? list.map((i) => `<li><details><summary>
-      ${ideaTab === "active" ? `<span class="tag">${esc(i.status)}</span>` : ""}${i.jev ? '<span class="tag jev">Jev 快速拒絕</span>' : ""}${esc(i.title)}</summary>
-      ${i.detail ? `<p>${esc(i.detail)}</p>` : ""}</details></li>`).join("") : '<li class="empty">沒有。</li>';
+      ${ideaTab === "active" ? `<span class="tag">${esc(i.status)}</span>` : ""}${i.jev ? '<span class="tag jev">Jev fast-reject</span>' : ""}${esc(i.title)}</summary>
+      ${i.detail ? `<p>${esc(i.detail)}</p>` : ""}</details></li>`).join("") : '<li class="empty">None.</li>';
 }
 $("ideaTabs").addEventListener("click", (e) => { const b = e.target.closest("[data-tab]"); if (b) { ideaTab = b.dataset.tab; tabPicked = true; renderIdeas(); } });
 
 function renderJev() {
   const show = S.jev.length || (S.run.jev && S.run.jev !== "off");
   $("jevCard").hidden = !show; if (!show) return;
-  $("jevSub").textContent = `${S.run.jev} · 最近 ${S.jev.length} 次`;
+  $("jevSub").textContent = `${S.run.jev} · last ${S.jev.length} calls`;
   const cls = (v) => ["REJECT", "SAME", "MISMATCH"].includes(v) ? "warn" : v === "PASS" ? "ok" : "";
   $("jev").innerHTML = S.jev.length ? `<table><tbody>${S.jev.map((j) =>
     `<tr><td class="num" style="text-align:left;width:1%">${time(j.ts)}</td><td><span class="chip ${cls(j.verdict)}">${esc(j.mode === "shadow" ? `SHADOW→${j.verdict}` : j.verdict)}</span><b style="font-weight:600">${esc(j.task)}</b><div class="small muted">${esc(j.why || "")}</div></td></tr>`).join("")}</tbody></table>`
-    : '<div class="empty">這次 run 還沒有呼叫過 Jev。</div>';
+    : '<div class="empty">Jev has not been called in this run yet.</div>';
 }
 function renderDocs() {
   const all = [...S.docs, ...S.prps];
@@ -552,8 +552,8 @@ const tip = $("tip");
 $("strip").addEventListener("mousemove", (e) => {
   const c = e.target.closest(".rcol")?.querySelector("[data-round]"); if (!c) { tip.style.display = "none"; return; }
   const i = S.rounds.findIndex((r) => r.n === +c.dataset.round), r = S.rounds[i], v = verdictOf(r) || "NOOP";
-  tip.innerHTML = `<b>第 ${r.n} 輪 · ${WORD[v] || v}</b><br>${esc(r.category || "")}${r.step ? ` · ${esc(r.step)}` : ""}<br>
-    ${r.subject ? esc(r.subject) + "<br>" : ""}被拒 ${r.rejects || 0} · 用時 ${dur(roundDur(r, i))}${r.gates.length ? "<br>" + r.gates.map((g) => esc(g.line || g.verdict)).join("<br>") : ""}`;
+  tip.innerHTML = `<b>Round ${r.n} · ${WORD[v] || v}</b><br>${esc(r.category || "")}${r.step ? ` · ${esc(r.step)}` : ""}<br>
+    ${r.subject ? esc(r.subject) + "<br>" : ""}rejected ${r.rejects || 0} · time ${dur(roundDur(r, i))}${r.gates.length ? "<br>" + r.gates.map((g) => esc(g.line || g.verdict)).join("<br>") : ""}`;
   tip.style.display = "block";
   const x = Math.min(e.clientX + 14, innerWidth - tip.offsetWidth - 8), y = Math.min(e.clientY + 14, innerHeight - tip.offsetHeight - 8);
   tip.style.left = `${x}px`; tip.style.top = `${y}px`;
@@ -568,7 +568,7 @@ async function tick() {
     if (!userPicked || !S.rounds.some((x) => x.n === selected)) selected = S.current?.round || S.rounds[S.rounds.length - 1]?.n || null;
     renderHeader(); renderNow(); renderHistory(); renderRound(); renderMeters(); renderIdeas(); renderJev(); renderDocs();
   } catch (e) {
-    $("pill").className = "pill stopped"; $("pillText").textContent = "連不到 dashboard server";
+    $("pill").className = "pill stopped"; $("pillText").textContent = "Cannot reach the dashboard server";
   }
   if (!S?.replay) setTimeout(tick, 3000);
 }
