@@ -12,6 +12,17 @@ SRC="$(cd "$(dirname "$0")/.." && pwd)"
 T="$(mktemp -d)"; trap 'rm -rf "$T"' EXIT
 mkdir -p "$T/repo" "$T/bin"
 cp -R "$SRC"/. "$T/repo/"; rm -rf "$T/repo/.git" "$T/repo/.loop"
+# Isolation: these scenarios assert the DRIVER's behavior, so nothing from the repo being tested may leak
+# in. An adopter's loop.config.env (e.g. JEV_MODE="prefilter") is replaced by a test-owned config — the
+# driver's own defaults — and every setting the driver lets the environment override is cleared.
+cat > "$T/repo/loop.config.env" <<'CFG'
+# written by scripts/test-driver.sh: the driver's defaults, so the repo's own settings cannot change what is asserted
+DEPLOY_BRANCH="main"
+LOOP_BRANCH="loop"
+JEV_MODE="off"
+CFG
+eval "$(grep -m1 '^OVERRIDABLE=' "$SRC/scripts/run-loop.sh")"
+for v in $OVERRIDABLE CONFIG CLAUDE_BIN JEV_BIN GATES JEV_TRIGGER_CONF GATE_EVIDENCE_CHARS SKIP_START_AUDIT ALLOW_NO_HOOK LOOP_RUN_ID LOOP_ROUND LOOP_EVENTS; do unset "$v"; done
 ( cd "$T/repo" && git init -q && git symbolic-ref HEAD refs/heads/main && git add -A \
   && git -c user.name=t -c user.email=t@t commit -qm init && git checkout -q -b loop && scripts/install-hooks.sh >/dev/null )
 cat > "$T/bin/claude" <<'STUB'
