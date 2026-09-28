@@ -362,4 +362,29 @@ expect_not "ROUND 1/3"
 out=$(env CLAUDE_BIN="$T/bin/claude-limit" LIMIT_WAIT=abc scripts/run-loop.sh 1 2>&1 | head -1)
 case "$out" in REFUSE:*LIMIT_WAIT*) echo "  ok   invalid LIMIT_WAIT refused";; *) echo "  FAIL LIMIT_WAIT validation: $out"; FAIL=1;; esac
 
+echo "### 19 a timed-out round says how far it got (still a NOOP): mid-fix, before validation, or plain"
+if command -v jq >/dev/null; then
+  # Prints the gate hand-backs in $HANDBACKS ("agent:TOKEN …"), then hangs past ROUND_TIMEOUT.
+  cat > "$T/bin/claude-hang" <<'S'
+#!/usr/bin/env bash
+for g in $HANDBACKS; do a=${g%%:*}; v=${g#*:}; k=VALUE; case "$a" in *validator) k=VERDICT;; esac
+  printf '{"type":"user","tool_use_result":{"status":"completed","prompt":"p","agentType":"%s","content":[{"type":"text","text":"%s: %s"}]}}\n' "$a" "$k" "$v"
+done
+sleep 60
+S
+  chmod +x "$T/bin/claude-hang"
+  hang_case() { rm -rf .loop; env CLAUDE_BIN="$T/bin/claude-hang" HANDBACKS="$1" SKIP_START_AUDIT=1 ROUND_TIMEOUT=2 scripts/run-loop.sh 1 >/dev/null 2>&1; }
+  hang_case "value-critic:ACCEPT validator:FAIL"
+  expect "noop/no-result \[consec=1/3\] — timeout mid-fix: the validator had failed the slice and ROUND_TIMEOUT=2s cut the fix loop off"
+  grep -q '"type":"round_end".*"why":"timeout mid-fix' .loop/events.jsonl && echo "  ok   round_end event carries the reason" || { echo "  FAIL round_end why"; FAIL=1; }
+  hang_case "value-critic:REJECT value-critic:ACCEPT"
+  expect "— timeout before validation: ROUND_TIMEOUT=2s"
+  hang_case ""
+  expect "noop/no-result \[consec=1/3\] — timeout: ROUND_TIMEOUT=2s"
+else
+  echo "  skip (jq not installed — no gate records to read how far the round got)"
+fi
+run_case "19b a NOOP that did not time out gets no timeout label" "LOOP_RESULT: NOOP | rejects=0\n" 1 SKIP_START_AUDIT=1
+expect "noop/no-result \[consec=1/3\]$"
+
 [ "$FAIL" = 0 ] && echo "ALL DRIVER TESTS PASSED" || { echo "DRIVER TESTS FAILED"; exit 1; }

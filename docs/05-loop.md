@@ -86,7 +86,7 @@ The hook is a local backstop, not a boundary: an agent with a shell can run `git
 
 **What a round cannot do to its own judges.** Before and after each round the driver fingerprints `PROTECTED_PATHS` (default: `.claude/agents`, `.claude/commands`, `LOOP_SPEC`, `.github`, `loop.config.env`, `POSITIONING`, and the loop's own scripts — `run-loop.sh`, `gate-log.sh`, `loop-event.sh`, `install-hooks.sh`, `test-driver.sh`, `adapters/`, `jev/`, `dashboard/`). The rest of `scripts/` is left alone, because the product this loop is copied into may keep its own code there. Setting `PROTECTED_PATHS` replaces the default, so list everything you want guarded. If the round changed any of them — committed or not — the run stops and parks for a human: a round must not edit value-critic's criteria, the harness, or the objective it is judged against. Positioning soft fields are still re-aimed by autonomous node P, which runs outside a round.
 
-**Timeouts.** Each `claude -p` runs in its own process group; on `ROUND_TIMEOUT` (and when a call ends) the whole group is terminated, so subagents, browsers, simulators, and dev servers it started do not outlive it.
+**Timeouts.** Each `claude -p` runs in its own process group; on `ROUND_TIMEOUT` (and when a call ends) the whole group is terminated, so subagents, browsers, simulators, and dev servers it started do not outlive it. A timed-out round is still a NOOP, but `loop.log` and the dashboard say how far it got, from its gate records: `timeout mid-fix` (the validator had failed the slice and the fix loop was cut off — usually a sign `ROUND_TIMEOUT` is too tight for this adapter), `timeout before validation`, or plain `timeout`.
 
 ## Gate records: `.loop/gates.jsonl`
 

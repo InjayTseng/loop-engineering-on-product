@@ -64,6 +64,8 @@ export function parseLoopLog(text) {
       lastEnd.commit = m[1]; lastEnd.subject = m[2];
     } else if (/claimed SHIPPED but HEAD did not move/.test(l) && lastEnd) {
       lastEnd.verdict = "NOOP";
+    } else if ((m = l.match(/^\s*noop\/no-result \[consec=\d+\/\d+\] — (.+)$/)) && lastEnd) {
+      lastEnd.why = m[1].trim();   // e.g. "timeout mid-fix: …"
     } else if ((m = l.match(/^\s*· state audit @ round (\d+)(?: \((.*)\))? ->/))) {
       gateRound = +m[1]; ev.push({ type: "audit_start", round: +m[1], why: m[2] || "" });
     } else if ((m = l.match(/^\s*AUDIT:\s*([A-Z_]+)?/))) {
@@ -120,7 +122,7 @@ export function buildRounds(events) {
     switch (e.type) {
       case "round_start": Object.assign(R(e.round), { start: e.ts, reset: e.reset, maint: e.maint }); break;
       case "round_end": Object.assign(R(e.round), { end: e.ts, verdict: e.verdict, category: e.category, step: e.step,
-        rejects: NUM(e.rejects, 0), commit: e.commit, subject: e.subject }); break;
+        rejects: NUM(e.rejects, 0), commit: e.commit, subject: e.subject, why: e.why || "" }); break;
       case "step": if (e.round != null) R(e.round).steps.push({ ts: e.ts, node: e.node, note: e.note }); break;
       case "audit": case "traj": case "position": case "jev_same": {
         const g = { type: e.type, ts: e.ts, verdict: e.verdict || (e.line || "").match(/JEV:\s*([A-Z]+)/)?.[1] || "", line: e.line, why: e.why };

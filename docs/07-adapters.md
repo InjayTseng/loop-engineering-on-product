@@ -32,6 +32,8 @@ Install: `npm i -D playwright` (it uses `channel: 'chrome'`, so no browser downl
 
 Set `IOS_PROJECT` / `IOS_SCHEME` / `IOS_BUNDLE_ID` / `IOS_SIM` in `loop.config.env`.
 
+**Give iOS rounds more time.** One build-and-screenshot check takes 3–5 minutes on a simulator, end-to-end runs longer, so a round that gets a validator FAIL and goes through the fix loop can easily pass 30 minutes. Measured on a live iOS run: a round with two rejected ideas and one validate → fix cycle hit the 1800 s default. Set `ROUND_TIMEOUT="3600"` for iOS adapters. A round that still times out is labelled in `loop.log` and the dashboard with how far it got (`timeout mid-fix`, `timeout before validation`).
+
 ## Recipe for a new setting
 
 Answer four questions:

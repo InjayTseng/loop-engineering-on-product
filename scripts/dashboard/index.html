@@ -502,7 +502,7 @@ function renderRound() {
   $("roundBody").className = "";
   const v = verdictOf(r) || "NOOP";
   const flags = [r.reset ? "RESET" : "", r.maint ? "MAINT" : ""].filter(Boolean);
-  const facts = [["Category", r.category], ["Funnel", r.step], ["Rejected", `${r.rejects || 0} ideas`], ["Time", dur(roundDur(r, i))],
+  const facts = [["Why", r.why], ["Category", r.category], ["Funnel", r.step], ["Rejected", `${r.rejects || 0} ideas`], ["Time", dur(roundDur(r, i))],
     ["Started", r.start ? new Date(r.start).toLocaleString("en-US", { hour12: false, month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit" }) : ""]].filter(([, x]) => x);
   const spans = r.steps.map((s, j) => new Date(r.steps[j + 1]?.ts || roundEnd(r, i) || S.generatedAt) - new Date(s.ts));
   const maxSpan = Math.max(1, ...spans.filter((x) => x > 0));
@@ -583,7 +583,7 @@ $("strip").addEventListener("mousemove", (e) => {
   const c = e.target.closest(".rcol")?.querySelector("[data-round]"); if (!c) { tip.style.display = "none"; return; }
   const i = S.rounds.findIndex((r) => r.n === +c.dataset.round), r = S.rounds[i], v = verdictOf(r) || "NOOP";
   tip.innerHTML = `<b>Round ${r.n} · ${WORD[v] || v}</b><br>${esc(r.category || "")}${r.step ? ` · ${esc(r.step)}` : ""}<br>
-    ${r.subject ? esc(r.subject) + "<br>" : ""}rejected ${r.rejects || 0} · time ${dur(roundDur(r, i))}${r.gates.length ? "<br>" + r.gates.map((g) => esc(g.line || g.verdict)).join("<br>") : ""}`;
+    ${r.why ? esc(r.why) + "<br>" : ""}${r.subject ? esc(r.subject) + "<br>" : ""}rejected ${r.rejects || 0} · time ${dur(roundDur(r, i))}${r.gates.length ? "<br>" + r.gates.map((g) => esc(g.line || g.verdict)).join("<br>") : ""}`;
   tip.style.display = "block";
   const x = Math.min(e.clientX + 14, innerWidth - tip.offsetWidth - 8), y = Math.min(e.clientY + 14, innerHeight - tip.offsetHeight - 8);
   tip.style.left = `${x}px`; tip.style.top = `${y}px`;

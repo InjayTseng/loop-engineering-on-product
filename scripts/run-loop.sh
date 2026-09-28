@@ -331,6 +331,19 @@ EOF
   fi
   if [ -n "$LIMIT_LINE" ]; then emit round_end "round#=$i" "verdict=LIMIT" "rejects#=$rj"; stop_for_limit "$i"; break; fi
 
+  # Why a round ended without a result: a timeout reads differently depending on how far the round got.
+  # Labels only — the round still counts as a NOOP toward MAX_NOOP.
+  noop_why=""
+  if [ "$V" != "SHIPPED" ] && [ "$V" != "REJECTED" ] && grep -q '^TIMEOUT after' "$log" 2>/dev/null; then
+    if [ "$g_val" -gt 0 ] && [ "$g_pass" -ne 1 ]; then
+      noop_why="timeout mid-fix: the $GATE_VALIDATOR_AGENT had failed the slice and ROUND_TIMEOUT=${ROUND_TIMEOUT}s cut the fix loop off"
+    elif [ "$g_val" -eq 0 ] && [ "$g_all" -gt 0 ]; then
+      noop_why="timeout before validation: ROUND_TIMEOUT=${ROUND_TIMEOUT}s"
+    else
+      noop_why="timeout: ROUND_TIMEOUT=${ROUND_TIMEOUT}s"
+    fi
+  fi
+
   case "$V" in
     SHIPPED)
       sh=1; consec_reject=0; consec_noop=0; reset_flag=0
@@ -348,10 +361,10 @@ EOF
       fi ;;
     *)
       consec_noop=$((consec_noop+1))
-      say "     noop/no-result [consec=$consec_noop/$MAX_NOOP]"
+      say "     noop/no-result [consec=$consec_noop/$MAX_NOOP]${noop_why:+ — $noop_why}"
       if [ "$consec_noop" -ge "$MAX_NOOP" ]; then
         say "=== STOP: $MAX_NOOP consecutive build/validate failures — structural, not a value problem. Fix the adapter or the product, then rerun. ==="
-        emit round_end "round#=$i" "verdict=${V:-NOOP}" "rejects#=$rj"
+        emit round_end "round#=$i" "verdict=${V:-NOOP}" "rejects#=$rj" "why=$noop_why"
         emit stop "round#=$i" "reason=$MAX_NOOP consecutive build/validate failures (structural)"
         break
       fi
@@ -362,7 +375,7 @@ EOF
     emit round_end "round#=$i" "verdict=SHIPPED" "category=${cat:-}" "step=$(echo "$RES" | grep -oE 'step=[^|]+' | cut -d= -f2- | sed 's/[[:space:]]*$//')" \
       "rejects#=$rj" "commit=$(git rev-parse --short HEAD)" "subject=$(git log -1 --format=%s)"
   else
-    emit round_end "round#=$i" "verdict=${V:-NOOP}" "rejects#=$rj"
+    emit round_end "round#=$i" "verdict=${V:-NOOP}" "rejects#=$rj" "why=$noop_why"
   fi
 
   # --- plateau on rolling rejection RATE (v2.1, window fixed for bash 3.2) -------------------
