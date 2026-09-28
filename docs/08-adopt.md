@@ -10,7 +10,7 @@ cd <your-repo> && git checkout -b loop
 scripts/install-hooks.sh          # pre-push hook: refuses DEPLOY_BRANCH at the git level
 ```
 
-`.claude/settings.local.json.example` is a minimal permission allowlist: copy it to `.claude/settings.local.json` (gitignored). It allows only `git push origin loop` and denies `push origin main` and `reset --hard`. Note that it governs interactive mode (`/loop-once`) only. The headless driver runs with `--dangerously-skip-permissions` and does not read it, so headless safety rests on the per-round branch check plus the `pre-push` hook.
+`.claude/settings.local.json.example` is a minimal permission allowlist: copy it to `.claude/settings.local.json` (gitignored). It allows only `git push origin loop` and denies `push origin main` and `reset --hard`. Note that it governs interactive mode (`/loop-once`) only. The headless driver runs with `--dangerously-skip-permissions` and does not read it, so headless safety rests on the per-round branch check, the `pre-push` hook (the driver refuses to start without it), and — because `git push --no-verify` skips any hook — branch protection on the remote.
 
 ## 2. Write the adapter (node B)
 
@@ -43,7 +43,8 @@ Optional, once the loop runs well without it: Jev pre-checks can fast-reject obv
 
 ## Acceptance: when a loop counts as installed
 
-- [ ] The driver REFUSEs on `main`
+- [ ] The driver REFUSEs on `main`, and REFUSEs without the `pre-push` hook
+- [ ] `DEPLOY_BRANCH` is protected on the remote (branch protection / ruleset: PR required, no direct or force pushes)
 - [ ] Within one `/loop-once` round you see all five lines: `VALUE:`, `PRP_SCORE:`, `BUILD:`, `VERDICT:`, `LOOP_RESULT:`
 - [ ] The validator is a different agent (check the transcript: the builder did not declare PASS itself)
 - [ ] Given a deliberately off-funnel idea, value-critic REJECTs it with a REDIRECT

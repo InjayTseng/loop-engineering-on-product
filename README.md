@@ -83,12 +83,12 @@ How to read it: yellow diamonds are **gates** — each judgment goes to an indep
 ## Key design choices
 
 - **Two independent gates, placed on either side of the build.** Value is judged before any code exists; correctness and promise-keeping are judged after, against the PRD, by an agent that did not write the code.
-- **A dumb driver.** `scripts/run-loop.sh` never reasons. It parses one line per node (`VALUE:`, `VERDICT:`, `LOOP_RESULT: … rejects=N`) and applies numeric rules. That is what makes it safe to run overnight, resumable, auditable — and testable with a stub (`scripts/test-driver.sh`, 9 scenarios).
+- **A dumb driver.** `scripts/run-loop.sh` never reasons. It parses one line per node (`VALUE:`, `VERDICT:`, `LOOP_RESULT: … rejects=N`) and applies numeric rules. That is what makes it safe to run overnight, resumable, auditable — and testable with a stub (`scripts/test-driver.sh`, 15 scenarios).
 - **Stop on the rejection rate, and hand off instead of ending.** When the value gate rejects more than ~1.5 ideas per idea shipped over a rolling window, the direction is exhausted; control goes to positioning, not to "done".
 - **Discover before building.** Every round starts from `product/state.md` and the running product, not from the previous round's notes.
 - **Positioning has hard and soft fields.** Target user, problem, and trust rules change only with a human. Funnel emphasis and the next stage to push can be changed overnight, and only when two senior agents independently agree.
 - **Trust rules are a hard gate.** On a trust product, an idea that relies on fabricated signals (fake counts, fake popularity, invented testimonials) is rejected no matter how well it would convert.
-- **Branch isolation is non-negotiable.** The driver refuses to run anywhere but the loop branch, re-checks every round, and a `pre-push` hook refuses the live branch at the git level.
+- **Branch isolation is non-negotiable.** The driver refuses to run anywhere but the loop branch, re-checks every round, and a `pre-push` hook refuses the live branch at the git level (the driver refuses to start without it). The hook is a local backstop — protect the live branch on the remote as well.
 - **Every gate decision is recorded.** With `jq` installed, each gate's full report, verdict, and the evidence it gathered are appended to `.loop/gates.jsonl` — a cross-run dataset for calibrating the gates.
 - **Optional: cheap fast-rejects that can never approve.** With `JEV_MODE=prefilter`, [TypeSafe's Jev](https://docs.typesafe.ai) — a model that returns typed yes/no and pick answers instead of text, in about 0.2 s — can fast-reject obvious bad ideas (fabricated signals, duplicates, non-goals) and flag broken label promises before an LLM gate spends a subagent on them. It can never approve anything: every pass still goes through the LLM gate. Rollout is off → shadow → prefilter, gated by an offline eval.
 - **Optional: watch it live.** `node scripts/dashboard/serve.mjs` serves a local, read-only page: run history, which node the current round is at, and how far each stop condition is from firing.
@@ -172,7 +172,7 @@ Start with [`docs/00-pipeline.md`](docs/00-pipeline.md): it defines the graph �
 ├── scripts/
 │   ├── run-loop.sh           # the deterministic driver: branch isolation, audits, plateau, trajectory,
 │   │                         #   autonomous positioning, timeout, gate recording, Jev hooks, dashboard events
-│   ├── test-driver.sh        # 11 scenarios with a stub `claude`, asserting how the driver stops and routes
+│   ├── test-driver.sh        # 15 scenarios with a stub `claude`, asserting how the driver stops and routes
 │   ├── gate-log.sh           # appends every gate decision (report, verdict, evidence) to .loop/gates.jsonl
 │   ├── loop-event.sh         # appends structured run / round / step events to .loop/events.jsonl
 │   ├── jev/                  # optional Jev pre-checks: jev.mjs (4 tasks) · ledger.mjs · eval-backlog.mjs ·

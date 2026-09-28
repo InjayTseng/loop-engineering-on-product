@@ -35,7 +35,7 @@ Fresh context every round: a broken round does not contaminate the next, context
 
 **The v2 → v2.1 fix.** v2's plateau only fired on "2 fully REJECTED rounds in a row". In the 20-round web-v2 run the value gate rejected 17 ideas inside rounds (0–2 per round; retries always found one that passed), and a fully REJECTED round never happened — so the plateau never fired. v2.1 reads the rolling rejection rate from `rejects=N` instead. That is why every `LOOP_RESULT` line must carry `rejects=`, 0 included.
 
-**Test the driver with a stub.** `scripts/run-loop.sh` consumes only the result lines `CLAUDE_BIN` prints, so a fake `claude` that prints one scripted line per call can run full scenarios (plateau fires, a RESET round is rejected again, autonomous positioning AGREES and the run continues, BROKEN forces maintenance, the main branch is refused). That is how the v2.1 plateau was found to be unable to fire at all (lesson 10). `bash scripts/test-driver.sh` runs 11 such scenarios.
+**Test the driver with a stub.** `scripts/run-loop.sh` consumes only the result lines `CLAUDE_BIN` prints, so a fake `claude` that prints one scripted line per call can run full scenarios (plateau fires, a RESET round is rejected again, autonomous positioning AGREES and the run continues, BROKEN forces maintenance, the main branch is refused). That is how the v2.1 plateau was found to be unable to fire at all (lesson 10). `bash scripts/test-driver.sh` runs 15 such scenarios; CI (`.github/workflows/test.yml`) runs them with the dashboard and Jev tests and shellcheck.
 
 **Stop = hand to P, not "done".** A high rejection rate means the low-hanging fruit under this positioning is picked, not that there is nothing left to do. Autonomous mode lets two senior agents try another soft-field angle; if that fails, the loop waits for a human.
 
@@ -73,7 +73,13 @@ tail -f .loop/loop.log
 kill $(cat .loop/run.pid)               # stop
 ```
 
-`--dangerously-skip-permissions` is required for headless mode (headless does not read the allowlist in `settings.local.json`). It is acceptable only because of branch isolation — the branch is re-checked every round, a `pre-push` hook blocks the live branch, only the loop branch is pushed — so anything broken on the loop branch cannot reach live.
+The driver runs `claude -p` with `--dangerously-skip-permissions`, which bypasses permission checks — so the allowlist in `settings.local.json` does not constrain a headless round. That is acceptable only because of branch isolation — the branch is re-checked every round, the driver refuses to start unless the `pre-push` hook is installed, only the loop branch is pushed — so anything broken on the loop branch cannot reach live.
+
+The hook is a local backstop, not a boundary: an agent with a shell can run `git push --no-verify`. The authoritative control is on the remote — a branch protection rule or ruleset on `DEPLOY_BRANCH` that requires a reviewed PR and blocks direct and force pushes. Set it up before the first overnight run.
+
+**What a round cannot do to its own judges.** Before and after each round the driver fingerprints `PROTECTED_PATHS` (default: `.claude/agents`, `.claude/commands`, `LOOP_SPEC`, `scripts`, `.github`, `loop.config.env`, `POSITIONING`). If the round changed any of them — committed or not — the run stops and parks for a human: a round must not edit value-critic's criteria, the harness, or the objective it is judged against. Positioning soft fields are still re-aimed by autonomous node P, which runs outside a round.
+
+**Timeouts.** Each `claude -p` runs in its own process group; on `ROUND_TIMEOUT` (and when a call ends) the whole group is terminated, so subagents, browsers, simulators, and dev servers it started do not outlive it.
 
 ## Gate records: `.loop/gates.jsonl`
 
@@ -89,7 +95,9 @@ With `jq` installed, every `claude -p` runs with `--output-format stream-json` a
 | `evidence` | every tool call the gate made, with its output (each truncated to `GATE_EVIDENCE_CHARS`, default 4000) |
 | `outcome` · `commit` | how the round ended; a commit only when HEAD actually moved |
 
-The file **accumulates across runs**: `round-NNN.*` is overwritten by the next run, `gates.jsonl` is not, so every record carries its own evidence instead of pointing at other files. It is the dataset for calibrating the gates — for example, Jev's shadow report ([09-jev](09-jev.md)) pairs each Jev call with the value-critic verdict recorded here. It lives under `.loop/`, so it is never committed: it contains product ideas that have not shipped. Screen it yourself before publishing any of it.
+The file **accumulates across runs**: `round-NNN.*` is overwritten by the next run, `gates.jsonl` is not, so every record carries its own evidence instead of pointing at other files. It is the dataset for calibrating the gates — for example, Jev's shadow report ([09-jev](09-jev.md)) pairs each Jev call with the value-critic verdict recorded here. It lives under `.loop/`, so it is never committed: it contains product ideas that have not shipped. Screen it yourself before publishing any of it — evidence keeps up to `GATE_EVIDENCE_CHARS` of every tool output a gate saw, which can include file contents, environment values, or tokens. Treat `.loop/` as sensitive and prune it on your own retention schedule.
+
+**The driver trusts these records over the round's self-report.** For each round it counts value-critic `REJECT` hand-backs in `gates.jsonl`: if the round's `LOOP_RESULT` reports fewer `rejects=`, the recorded count feeds the plateau window. A `SHIPPED` round whose last validator hand-back is not `VERDICT: PASS` (or that has no validator hand-back at all) is counted as NOOP. If a SHIPPED round recorded no hand-backs at all, the driver logs a warning instead — that usually means the transcript format changed, and it should be investigated rather than silently trusted.
 
 Without `jq` all of this switches off and the driver runs in plain-text mode as before.
 
@@ -100,7 +108,7 @@ Without `jq` all of this switches off and the driver runs in plain-text mode as 
 
 ## Safety
 
-- The driver checks the branch at the start of every round and REFUSEs anything but `LOOP_BRANCH`; `scripts/install-hooks.sh` installs a `pre-push` hook that refuses the live branch at the git level; SHIPPED only counts if HEAD actually moved.
+- The driver checks the branch at the start of every round and REFUSEs anything but `LOOP_BRANCH`; `scripts/install-hooks.sh` installs a `pre-push` hook that refuses the live branch at the git level; SHIPPED only counts if HEAD actually moved and (with `jq`) the last recorded validator verdict is PASS; a round that edits `PROTECTED_PATHS` parks the run.
 - Every round has a `ROUND_TIMEOUT` (default 1800s); a hung round is killed and counted as NOOP. `kill $(cat .loop/run.pid)` also stops the `claude -p` in flight.
 - The spec only runs `git add <specific files>`; failures use `git checkout -- <files>` or `git stash push -m`, never `reset --hard`.
 - No automatic merges; no credential files touched; fabricated signals on a trust product are blocked at F.
