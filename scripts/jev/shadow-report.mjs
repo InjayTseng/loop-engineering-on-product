@@ -26,6 +26,8 @@ const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
 const arg = (k, d) => { const i = process.argv.indexOf(k); return i > 0 ? process.argv[i + 1] : d; };
 const JEV = resolve(ROOT, arg("--jev", ".loop/jev.jsonl"));
 const GATES = resolve(ROOT, arg("--gates", ".loop/gates.jsonl"));
+// the value gate's subagent name, as the driver cross-checks it (GATE_VALUE_AGENT in loop.config.env)
+const VALUE_AGENT = process.env.GATE_VALUE_AGENT || "value-critic";
 
 const rows = (p) => existsSync(p)
   ? readFileSync(p, "utf8").split("\n").flatMap((l) => { try { return l.trim() ? [JSON.parse(l)] : []; } catch { return []; } })
@@ -33,7 +35,7 @@ const rows = (p) => existsSync(p)
 const group = (list, key) => list.reduce((m, r) => m.set(key(r), [...(m.get(key(r)) || []), r]), new Map());
 
 const shadow = rows(JEV).filter((r) => r.task === "prefilter" && r.mode === "shadow" && r.run && r.round != null);
-const critic = rows(GATES).filter((r) => r.agent === "value-critic" && r.kind === "round");
+const critic = rows(GATES).filter((r) => r.agent === VALUE_AGENT && r.kind === "round");
 const jevBy = group(shadow, (r) => `${r.run}/${r.round}`);
 const gateBy = group(critic, (r) => `${r.run}/${r.round}`);
 

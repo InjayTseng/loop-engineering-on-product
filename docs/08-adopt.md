@@ -18,7 +18,7 @@ Pick `scripts/adapters/web-check.mjs` or `ios-shot.sh`, or write one from the fo
 
 ## 3. Fill in `loop.config.env`
 
-North star and funnel, categories (7±2), `TRUST_PRODUCT`, thresholds, `DEPLOY_BRANCH` ≠ `LOOP_BRANCH`, `BUILD_CMD`. If you have no funnel yet, define a rough one — without a north star the value gate degrades to "looks fine to me". Leave `JEV_MODE="off"` for now.
+North star and funnel, categories (7±2), `TRUST_PRODUCT`, thresholds, `DEPLOY_BRANCH` ≠ `LOOP_BRANCH`, `BUILD_CMD`. If you renamed `value-critic` or `validator`, set `GATE_VALUE_AGENT` / `GATE_VALIDATOR_AGENT` to match. If your product keeps code under a path the loop protects by default, check `PROTECTED_PATHS`. If you have no funnel yet, define a rough one — without a north star the value gate degrades to "looks fine to me". Leave `JEV_MODE="off"` for now.
 
 ## 4. Positioning and current state (P, C)
 

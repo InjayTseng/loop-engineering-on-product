@@ -41,7 +41,7 @@ ROOT="$(cd "$(dirname "$0")/.." && pwd)"; cd "$ROOT"
 CONFIG="${CONFIG:-loop.config.env}"
 [ -f "$CONFIG" ] || { echo "REFUSE: $CONFIG not found. Copy and fill loop.config.env first."; exit 1; }
 # Environment overrides beat the config file (documented usage: LOOP_MODEL=... scripts/run-loop.sh).
-OVERRIDABLE="ROUNDS LOOP_MODEL POSITIONING_MODEL LOOP_BRANCH DEPLOY_BRANCH WINDOW PLATEAU_REJ PLATEAU_SHIP MAX_CONSEC_REJECTED MAX_NOOP MAX_CONSEC_MAINT TRAJ_EVERY AUDIT_EVERY AUTONOMOUS_POSITIONING MAX_AUTO_POSITIONING LOOP_SPEC POSITIONING STATE ROUND_TIMEOUT JEV_MODE JEV_REJECT_P PROTECTED_PATHS"
+OVERRIDABLE="ROUNDS LOOP_MODEL POSITIONING_MODEL LOOP_BRANCH DEPLOY_BRANCH WINDOW PLATEAU_REJ PLATEAU_SHIP MAX_CONSEC_REJECTED MAX_NOOP MAX_CONSEC_MAINT TRAJ_EVERY AUDIT_EVERY AUTONOMOUS_POSITIONING MAX_AUTO_POSITIONING LOOP_SPEC POSITIONING STATE ROUND_TIMEOUT JEV_MODE JEV_REJECT_P PROTECTED_PATHS GATE_VALUE_AGENT GATE_VALIDATOR_AGENT"
 for v in $OVERRIDABLE; do eval "_env_$v=\${$v-__unset__}"; done
 # shellcheck disable=SC1090
 set -a; . "$CONFIG"; set +a
@@ -60,7 +60,11 @@ LOOP_SPEC="${LOOP_SPEC:-.claude/tasks/innovation_loop.md}"
 POSITIONING="${POSITIONING:-product/positioning.md}"; STATE="${STATE:-product/state.md}"
 ROUND_TIMEOUT="${ROUND_TIMEOUT:-1800}"
 # What a round may never change: its own judges, the harness, and the objective (node P owns positioning).
-PROTECTED_PATHS="${PROTECTED_PATHS:-.claude/agents .claude/commands $LOOP_SPEC scripts .github $CONFIG $POSITIONING}"
+# Only the loop's own files under scripts/ — the product this is copied into may keep its code there too.
+LOOP_SCRIPTS="scripts/run-loop.sh scripts/gate-log.sh scripts/loop-event.sh scripts/install-hooks.sh scripts/test-driver.sh scripts/adapters scripts/jev scripts/dashboard"
+PROTECTED_PATHS="${PROTECTED_PATHS:-.claude/agents .claude/commands $LOOP_SPEC $LOOP_SCRIPTS .github $CONFIG $POSITIONING}"
+# The subagent names the driver cross-checks in .loop/gates.jsonl (they must match .claude/agents/*.md `name:`).
+GATE_VALUE_AGENT="${GATE_VALUE_AGENT:-value-critic}"; GATE_VALIDATOR_AGENT="${GATE_VALIDATOR_AGENT:-validator}"
 JEV_MODE="${JEV_MODE:-off}"; JEV_REJECT_P="${JEV_REJECT_P:-0.85}"; JEV_BIN="${JEV_BIN:-$ROOT/scripts/jev/jev.mjs}"
 export JEV_MODE JEV_REJECT_P   # the round agent's own Jev calls (spec Step 2b, validator 3b) inherit the mode
 LOGDIR="$ROOT/.loop"; mkdir -p "$LOGDIR"; echo $$ > "$LOGDIR/run.pid"
@@ -118,14 +122,15 @@ record_gates() {  # $1 log, $2 kind, $3 round, $4 outcome line, $5 commit (only 
   [ "${n:-0}" -gt 0 ] 2>/dev/null && say "    gates recorded: $n -> .loop/gates.jsonl"; return 0; }
 
 # --- what the round's own gates decided, from .loop/gates.jsonl (not from the round's self-report)
-gate_counts() {  # $1 round → "<value-critic REJECTs> <validator hand-backs> <last validator PASS 0|1> <all hand-backs>"
-  [ "$STREAM" = 1 ] && [ -f "$LOGDIR/gates.jsonl" ] || { echo "0 0 0 0"; return 0; }
-  jq -Rrn --arg run "$RUN_ID" --argjson r "$1" '
+gate_counts() {  # $1 round → "<value REJECTs> <validator hand-backs> <last validator PASS 0|1> <all hand-backs> <agents seen>"
+  [ "$STREAM" = 1 ] && [ -f "$LOGDIR/gates.jsonl" ] || { echo "0 0 0 0 -"; return 0; }
+  jq -Rrn --arg run "$RUN_ID" --argjson r "$1" --arg va "$GATE_VALUE_AGENT" --arg vd "$GATE_VALIDATOR_AGENT" '
     [inputs | fromjson? | select(.run == $run and .kind == "round" and .round == $r)] as $g
-    | ($g | map(select(.agent == "validator"))) as $v
-    | [($g | map(select(.agent == "value-critic" and .verdict.token == "REJECT")) | length),
-       ($v | length), (if ($v | last | .verdict.token) == "PASS" then 1 else 0 end), ($g | length)]
-    | map(tostring) | join(" ")' "$LOGDIR/gates.jsonl" 2>/dev/null || echo "0 0 0 0"; }
+    | ($g | map(select(.agent == $vd))) as $v
+    | [($g | map(select(.agent == $va and .verdict.token == "REJECT")) | length),
+       ($v | length), (if ($v | last | .verdict.token) == "PASS" then 1 else 0 end), ($g | length),
+       ($g | map(.agent) | unique | join(",") | if . == "" then "-" else . end)]
+    | map(tostring) | join(" ")' "$LOGDIR/gates.jsonl" 2>/dev/null || echo "0 0 0 0 -"; }
 
 # --- protected paths: a round that edits its judges, the harness or the objective is parked ----
 # Fingerprint of the working tree vs a base commit, restricted to PROTECTED_PATHS. Taken before and
@@ -248,17 +253,17 @@ while [ "$i" -lt "$N" ]; do
     park_for_human "$reason"; break
   fi
 
-  read -r g_rej g_val g_pass g_all <<EOF
+  read -r g_rej g_val g_pass g_all g_seen <<EOF
 $(gate_counts "$i")
 EOF
   if [ "$g_rej" -gt "$rj" ]; then
-    say "     reported rejects=$rj but gate records show $g_rej value-critic REJECTs — counting $g_rej"; rj=$g_rej
+    say "     reported rejects=$rj but gate records show $g_rej $GATE_VALUE_AGENT REJECTs — counting $g_rej"; rj=$g_rej
   fi
   if [ "$V" = "SHIPPED" ] && [ "$STREAM" = 1 ]; then
     if [ "$g_all" -eq 0 ]; then
       say "     warning: no gate hand-backs recorded for this SHIPPED round — cannot verify value-critic / validator ran"
     elif [ "$g_val" -eq 0 ] || [ "$g_pass" -ne 1 ]; then
-      say "     claimed SHIPPED but the last validator verdict is not PASS (validator hand-backs=$g_val) — counting as NOOP"; V="NOOP"
+      say "     claimed SHIPPED but the last $GATE_VALIDATOR_AGENT verdict is not PASS ($GATE_VALIDATOR_AGENT hand-backs=$g_val; agents recorded: $g_seen) — counting as NOOP"; V="NOOP"
     fi
   fi
 

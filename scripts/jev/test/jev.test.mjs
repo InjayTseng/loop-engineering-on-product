@@ -113,6 +113,13 @@ expect("a round whose counts differ is left unpaired, not guessed", mixed, /unpa
 expect("no pairs → NO_DATA", lastLine(mixed), /^JEV_SHADOW: NO_DATA/);
 const prefilterRow = { ...sh(4, "REJECT", "x"), mode: "prefilter" };
 expect("prefilter-mode rows are ignored (value-critic never saw a fast-rejected idea)", lastLine(report([prefilterRow], [])), /^JEV_SHADOW: NO_DATA/);
+const renamed = (jevRows, gateRows, name) => {
+  writeFileSync(join(rep, "jev.jsonl"), jl(jevRows)); writeFileSync(join(rep, "gates.jsonl"), jl(gateRows));
+  return execFileSync("node", [REPORT, "--jev", join(rep, "jev.jsonl"), "--gates", join(rep, "gates.jsonl")],
+    { encoding: "utf8", env: { ...process.env, GATE_VALUE_AGENT: name } });
+};
+expect("a renamed value gate is paired via GATE_VALUE_AGENT", lastLine(renamed([sh(5, "REJECT", "x")], [{ ...vc(5, "REJECT"), agent: "growth-critic" }], "growth-critic")),
+  /^JEV_SHADOW: SAFE — pairs=1 false_rejects=0 caught=1\/1$/);
 rmSync(rep, { recursive: true, force: true });
 
 console.log(fail ? "JEV TESTS FAILED" : "ALL JEV TESTS PASSED");

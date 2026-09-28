@@ -173,7 +173,7 @@ if command -v jq >/dev/null; then
   # STUB_GATES = space-separated "agent:TOKEN" hand-backs; REPORTED = the round's own LOOP_RESULT line.
   cat > "$T/bin/claude-gates" <<'S'
 #!/usr/bin/env bash
-for g in $STUB_GATES; do a=${g%%:*}; v=${g#*:}; k=VALUE; [ "$a" = validator ] && k=VERDICT
+for g in $STUB_GATES; do a=${g%%:*}; v=${g#*:}; k=VALUE; case "$a" in *validator) k=VERDICT;; esac
   printf '{"type":"user","tool_use_result":{"status":"completed","prompt":"p","agentType":"%s","content":[{"type":"text","text":"%s: %s"}]}}\n' "$a" "$k" "$v"
 done
 echo x >> shipped.txt; git add shipped.txt; git -c user.name=t -c user.email=t@t commit -qm "loop: stub ship"
@@ -185,10 +185,17 @@ S
   expect "reported rejects=0 but gate records show 2 value-critic REJECTs — counting 2"
   expect "STOP: value plateau"
   gates_case "value-critic:ACCEPT validator:FAIL" "LOOP_RESULT: SHIPPED | category=a | step=s | rejects=0"
-  expect "claimed SHIPPED but the last validator verdict is not PASS \(validator hand-backs=1\) — counting as NOOP"
+  expect "claimed SHIPPED but the last validator verdict is not PASS \(validator hand-backs=1; agents recorded: validator,value-critic\) — counting as NOOP"
   gates_case "value-critic:ACCEPT" "LOOP_RESULT: SHIPPED | category=a | step=s | rejects=0"
-  expect "last validator verdict is not PASS \(validator hand-backs=0\)"
+  expect "last validator verdict is not PASS \(validator hand-backs=0; agents recorded: value-critic\)"
   gates_case "value-critic:ACCEPT validator:FAIL validator:PASS" "LOOP_RESULT: SHIPPED | category=a | step=s | rejects=0"
+  expect_not "counting as NOOP"
+  expect "shipped: .* loop: stub ship"
+  # 12b a project that renamed its validator: without GATE_VALIDATOR_AGENT every ship would be a NOOP;
+  # the log names the agents it did see, and setting the name fixes it.
+  gates_case "value-critic:ACCEPT web-validator:PASS" "LOOP_RESULT: SHIPPED | category=a | step=s | rejects=0"
+  expect "validator hand-backs=0; agents recorded: value-critic,web-validator\) — counting as NOOP"
+  gates_case "value-critic:ACCEPT web-validator:PASS" "LOOP_RESULT: SHIPPED | category=a | step=s | rejects=0" GATE_VALIDATOR_AGENT=web-validator
   expect_not "counting as NOOP"
   expect "shipped: .* loop: stub ship"
 else
@@ -214,6 +221,21 @@ echo "soft field" >> product/positioning.md
 run_case "13b a pre-existing uncommitted protected edit (autonomous P soft fields) is not blamed on the round" "LOOP_RESULT: SHIPPED | category=a | step=s | rejects=0\n" 1 SKIP_START_AUDIT=1
 expect_not "protected paths"
 git checkout -q HEAD -- product/positioning.md
+
+echo "### 13c scripts/ holds product code too: only the loop's own scripts are protected"
+cat > "$T/bin/claude-scripts" <<'S'
+#!/usr/bin/env bash
+echo "// $TOUCH" >> "$TOUCH"; git add "$TOUCH"; git -c user.name=t -c user.email=t@t commit -qm "loop: edit $TOUCH"
+echo "LOOP_RESULT: SHIPPED | category=a | step=s | rejects=0"
+S
+chmod +x "$T/bin/claude-scripts"
+rm -rf .loop; env CLAUDE_BIN="$T/bin/claude-scripts" SKIP_START_AUDIT=1 TOUCH=scripts/product-build.sh scripts/run-loop.sh 1 >/dev/null 2>&1
+expect_not "protected paths"
+expect "shipped: .* loop: edit scripts/product-build.sh"
+git -c user.name=t -c user.email=t@t revert --no-edit HEAD >/dev/null
+rm -rf .loop; env CLAUDE_BIN="$T/bin/claude-scripts" SKIP_START_AUDIT=1 TOUCH=scripts/adapters/web-check.mjs scripts/run-loop.sh 1 >/dev/null 2>&1
+expect "STOP: round 1 changed protected paths \(scripts/adapters/web-check.mjs\)"
+git -c user.name=t -c user.email=t@t revert --no-edit HEAD >/dev/null
 
 echo "### 14 timeout kills the whole process group (grandchildren too)"
 cat > "$T/bin/hang-tree" <<'H'
