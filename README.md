@@ -93,6 +93,73 @@ How to read it: yellow diamonds are **gates** — each judgment goes to an indep
 - **Optional: cheap fast-rejects that can never approve.** With `JEV_MODE=prefilter`, [TypeSafe's Jev](https://docs.typesafe.ai) — a model that returns typed yes/no and pick answers instead of text, in about 0.2 s — can fast-reject obvious bad ideas (fabricated signals, duplicates, non-goals) and flag broken label promises before an LLM gate spends a subagent on them. It can never approve anything: every pass still goes through the LLM gate. Rollout is off → shadow → prefilter, gated by an offline eval.
 - **Optional: watch it live.** `node scripts/dashboard/serve.mjs` serves a local, read-only page: run history, which node the current round is at, and how far each stop condition is from firing.
 
+## What Jev can do
+
+[Jev](https://docs.typesafe.ai) is a cheap, fast judgment model — about 0.2 s and roughly $0.02 per thousand calls. It only answers narrow typed questions (yes/no, pick one) and never sees the code. So the framework gives it one hard rule: **Jev can only block or trigger, never approve.** What passes is always decided by the full LLM gates — value-critic, validator, trajectory-monitor, state-auditor.
+
+It has seven checkpoints in the loop, each with its own question and one possible effect:
+
+```mermaid
+flowchart LR
+  classDef llm fill:#fff3cd,stroke:#b58900,color:#000
+  classDef jev fill:#e8f0fe,stroke:#1a56db,color:#000,stroke-dasharray:4 3
+  classDef step fill:#f6f8fa,stroke:#57606a,color:#000
+
+  subgraph ROUND["One round: the LLM gates decide"]
+    direction LR
+    R["R research"]
+    F{"F value-critic"}
+    D["D build + fix loop"]
+    V{"V validator"}
+    Y["Y ship"]
+    R --> F -- ACCEPT --> D --> V -- PASS --> Y
+  end
+  T{"T trajectory-monitor"}
+  A{"C state-auditor"}
+  RV{"a fresh validator<br/>re-validates"}
+
+  J1(["pick<br/>which of 2–4 candidates<br/>moves the next stage?"])
+  J2(["prefilter<br/>fabricated? duplicate?<br/>non-goal?"])
+  J3(["same-failure<br/>same cause as last time,<br/>nothing changed?"])
+  J4(["label-promise<br/>does the button do<br/>what its label says?"])
+  J5(["claim-evidence<br/>do the validator's own outputs<br/>show the CLAIM?"])
+  J6(["same-tactic<br/>same trick as<br/>recent ships?"])
+  J7(["noop-cause<br/>environment? adapter?<br/>code? spec?"])
+
+  J1 -. "PICK k: write k first" .-> R
+  J2 -. "REJECT: back to R,<br/>no value-critic spent" .-> F
+  J3 -. "SAME_FAILURE: counts as<br/>2 of the 3 attempts" .-> D
+  J4 -. "MISMATCH: a blocker<br/>on axis 4" .-> V
+  V -. "after PASS" .-> J5
+  J5 -. "UNSUPPORTED / CONTRADICTED" .-> RV
+  Y -. "after each ship" .-> J6
+  J6 -. "SAME: run it now" .-> T
+  D -. "round gave up (NOOP)" .-> J7
+  J7 -. "AUDIT_NOW: audit now" .-> A
+
+  class F,V,T,A,RV llm
+  class J1,J2,J3,J4,J5,J6,J7 jev
+  class R,D,Y step
+```
+
+| Checkpoint | What Jev is asked | What it can do |
+|---|---|---|
+| **pick** — research | Which of 2–4 candidate ideas most likely moves the next stage? | `PICK <key>`: write that one first — it still has to pass value-critic |
+| **prefilter** — before value-critic | Does the idea rely on fabricated data, duplicate something already seen, or hit a non-goal? | `REJECT`: sent back to research, saving a value-critic run |
+| **same-failure** — fix loops | Is this failure the same cause as the last one, with nothing materially changed? | `SAME_FAILURE`: this failure counts as two of the loop's three attempts |
+| **label-promise** — inside the validator | Does the observed behavior deliver what the button's label promises? | `MISMATCH`: listed as a blocker |
+| **claim-evidence** — after a validator PASS | Do the commands and outputs the validator actually ran show the PRD's CLAIM holding? | `UNSUPPORTED` / `CONTRADICTED`: a fresh validator re-validates, and its verdict decides |
+| **same-tactic** — after each ship | Is the newest commit the same trick as the last few? | `SAME`: run the trajectory check now instead of waiting |
+| **noop-cause** — after a round gives up | Is the cause the environment, the adapter, the code, or the spec? | `AUDIT_NOW`: environment or adapter trouble → run the deep state audit now |
+
+Every checkpoint can also answer with one of three outcomes that **do nothing**, so the LLM gate decides exactly as it would without Jev:
+
+- **`PASS`** — "not confident enough to block". This is not an approval.
+- **`ESCALATE`** — Jev itself is unsure.
+- **`UNAVAILABLE`** — no answer in time (15 s timeout). The only cost is the wait.
+
+With `JEV_MODE=shadow` every answer is only a `SHADOW` line: logged, never acted on, so you can measure how often Jev would have been right before letting it block. In the first live `prefilter` run (12 rounds, about ten calls), Jev blocked or triggered nothing: mostly `PASS` and `DISTINCT`, one `ESCALATE`, two timeouts. Rollout order, safety rules and the evidence behind each checkpoint: [`docs/09-jev.md`](docs/09-jev.md).
+
 ## Watch it run
 
 `node scripts/dashboard/serve.mjs` opens a local, read-only dashboard at http://127.0.0.1:4400. It reads only the files the loop already writes and never steers it.
