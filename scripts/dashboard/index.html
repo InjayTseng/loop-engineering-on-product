@@ -151,7 +151,7 @@ body::before { content: ""; position: fixed; inset: 0; pointer-events: none; z-i
 @keyframes spin { to { transform: rotate(360deg); } }
 @keyframes ripple-ring { from { transform: scale(1); opacity: .8; } to { transform: scale(1.9); opacity: 0; } }
 .gatebox { display: flex; gap: 8px; padding-left: 14px; border-left: 1px dashed var(--line-2); }
-@media (prefers-reduced-motion: reduce) { .pill.running .dot, .pill.running .dot::after, .stop.now .b, .stop.now .b::before, .stop.now .b::after, .rail .flow, .rail .flow::after, .rail.live .fillbar::after, .srow.cur .dbar i { animation: none !important; }
+@media (prefers-reduced-motion: reduce) { .pill.running .dot, .pill.running .dot::after, .stop.now .b, .stop.now .b::before, .stop.now .b::after, .s-RUNNING .ic, .rail .flow, .rail .flow::after, .rail.live .fillbar::after, .srow.cur .dbar i { animation: none !important; }
   .pill.running .dot::after, .stop.now .b::after, .rail .flow::after, .rail.live .fillbar::after { display: none; } }
 @media (max-width: 700px) {
   .now-head { grid-template-columns: auto minmax(0, 1fr); gap: 16px; }
@@ -173,30 +173,36 @@ body::before { content: ""; position: fixed; inset: 0; pointer-events: none; z-i
 .kpi .v { font-family: var(--mono); font-variant-numeric: tabular-nums; font-size: 24px; font-weight: 700; letter-spacing: -.01em; text-shadow: 0 0 16px var(--accent-soft); margin-top: 2px; white-space: nowrap; }
 .kpi .v small { font-size: 12px; font-weight: 500; color: var(--muted); margin-left: 4px; }
 
-/* history: rejects-per-round bars over status tiles */
+/* history: one column per round, one labelled row per signal */
+.hist[hidden] { display: none; }
+.hist { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 0 12px; align-items: start; }
+.hlabels, .rcol { display: grid; grid-template-rows: 48px 22px 22px 12px; row-gap: 8px; }
+.hlabels { padding-top: 10px; }
+.hlabels > div { display: flex; align-items: center; font-family: var(--mono); font-size: 10.5px; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); white-space: nowrap; }
+.hlabels > div small { margin-left: 6px; letter-spacing: 0; text-transform: none; color: var(--ink-2); }
 .strip { position: relative; display: flex; gap: 6px; overflow-x: auto; padding: 10px 4px 4px; }
-.rcol { flex: 1 1 0; min-width: 28px; max-width: 48px; display: flex; flex-direction: column; gap: 6px; position: relative; }
-.rcol.inwin::before { content: ""; position: absolute; inset: -8px -3px -4px; background: var(--band); border-radius: 9px; }
-.barcell { position: relative; height: 58px; display: flex; flex-direction: column; justify-content: flex-end; align-items: center; }
-.barcell .bv { font-size: 10.5px; color: var(--ink-2); font-family: var(--mono); margin-bottom: 2px; }
-.barcell .bar { width: min(12px, 40%); border-radius: 4px 4px 0 0; background: var(--warning); }
-.barcell .base { width: 100%; height: 1px; background: var(--line-2); }
-.tile { position: relative; border: 0; border-radius: 10px; padding: 8px 0 7px; cursor: pointer; background: var(--surface-2);
-  box-shadow: inset 0 0 0 1px var(--ring); text-align: center; transition: transform .12s, box-shadow .12s; }
-.tile:hover { transform: translateY(-1px); box-shadow: inset 0 0 0 1px var(--line-2), 0 4px 12px rgba(0,0,0,.1); }
-.tile[aria-current="true"] { box-shadow: inset 0 0 0 2px var(--ink); }
-.tile::after { content: ""; position: absolute; left: 9px; right: 9px; top: 0; height: 3px; border-radius: 0 0 3px 3px; background: var(--muted); }
-.tile .no { display: block; font-size: 11px; color: var(--muted); font-family: var(--mono); }
-.tile .ic { display: block; font-size: 17px; font-weight: 800; line-height: 20px; }
-.tile .mk { position: absolute; top: -8px; right: -5px; display: flex; gap: 2px; z-index: 2; }
-.s-SHIPPED::after { background: var(--good); } .s-SHIPPED .ic { color: var(--good-ink); }
-.s-REJECTED::after { background: var(--warning); } .s-REJECTED .ic { color: var(--warning-ink); }
-.s-NOOP::after { background: var(--critical); } .s-NOOP .ic { color: var(--critical-ink); }
-.s-RUNNING::after { background: var(--accent); } .s-RUNNING .ic { color: var(--accent-ink); }
+.rcol { flex: 1 1 0; min-width: 34px; max-width: 52px; position: relative; }
+.tile { --c: var(--muted); position: relative; border: 0; border-radius: 10px; cursor: pointer; display: grid; place-content: center; gap: 1px;
+  background: color-mix(in srgb, var(--c) 14%, var(--surface-2)); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--c) 45%, transparent);
+  text-align: center; transition: transform .12s, box-shadow .12s; }
+.tile:hover { transform: translateY(-1px); box-shadow: inset 0 0 0 1px var(--c), 0 0 14px -4px var(--c); }
+.tile[aria-current="true"] { box-shadow: inset 0 0 0 2px var(--c), 0 0 16px -3px var(--c); }
+.tile .no { font-size: 10.5px; color: var(--ink-2); font-family: var(--mono); line-height: 1; }
+.tile .ic { font-size: 16px; font-weight: 800; line-height: 18px; color: var(--c); }
+.s-SHIPPED { --c: var(--good); } .s-REJECTED { --c: var(--warning); } .s-NOOP { --c: var(--critical); } .s-RUNNING { --c: var(--accent); }
+.s-RUNNING .ic { animation: spin 2.4s linear infinite; }
+.rej, .gts { display: flex; flex-wrap: wrap; align-items: center; justify-content: center; gap: 3px; }
+.rej i { width: 7px; height: 7px; border-radius: 50%; background: var(--warning); box-shadow: 0 0 6px -1px var(--warning); }
+.rej b { font-size: 10px; font-family: var(--mono); color: var(--warning-ink); font-weight: 700; }
+.rej .none, .gts .none { width: 8px; height: 1px; background: var(--line-2); }
+.wcell { align-self: center; height: 4px; margin: 0 -3px; }
+.wcell.on { background: var(--warning); opacity: .75; box-shadow: 0 0 8px -1px var(--warning); }
+.wcell.on.first { margin-left: 2px; border-radius: 3px 0 0 3px; } .wcell.on.last { margin-right: 2px; border-radius: 0 3px 3px 0; }
 .mkb { display: inline-block; font-size: 9px; font-weight: 800; line-height: 14px; min-width: 14px; padding: 0 3px; border-radius: 5px; background: var(--surface); color: var(--ink-2); box-shadow: inset 0 0 0 1px var(--line-2); font-family: var(--mono); text-align: center; }
 .mkb.alert { color: #fff; background: var(--critical); box-shadow: none; }
 .mkb.warn { color: #000; background: var(--warning); box-shadow: none; }
 .legend { display: flex; flex-wrap: wrap; gap: 6px 16px; margin-top: 14px; font-size: 12px; color: var(--ink-2); align-items: center; }
+.legend b { font-family: var(--mono); font-size: 10.5px; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); font-weight: 700; }
 .legend .sw { display: inline-block; width: 10px; height: 10px; border-radius: 3px; vertical-align: -1px; margin-right: 5px; }
 
 .tip { position: fixed; z-index: 10; pointer-events: none; background: var(--surface); color: var(--ink); border-radius: 10px; padding: 9px 11px; font-size: 12px; max-width: 320px; display: none;
@@ -305,16 +311,18 @@ dialog pre { margin: 0; padding: 16px; overflow: auto; max-height: calc(100vh - 
       <section class="card" aria-labelledby="h-hist">
         <h2 id="h-hist">History <span class="sub" id="histSub"></span>
           <button class="ghost right" id="viewToggle" aria-pressed="false">Table view</button></h2>
-        <div id="strip" class="strip" role="list"></div>
+        <div class="hist" id="histGrid">
+          <div class="hlabels" aria-hidden="true"><div>Result</div><div>Ideas rejected</div><div>Gate checks</div><div>Plateau window<small id="winLabel"></small></div></div>
+          <div id="strip" class="strip" role="list"></div>
+        </div>
         <div id="roundTable" class="scroll-x" hidden></div>
         <div class="legend">
+          <span><b>Result</b></span>
           <span><span class="sw" style="background:var(--good)"></span>✓ shipped</span>
           <span><span class="sw" style="background:var(--warning)"></span>✕ fully rejected</span>
           <span><span class="sw" style="background:var(--critical)"></span>! NOOP</span>
           <span><span class="sw" style="background:var(--accent)"></span>◌ running</span>
-          <span><span class="sw" style="background:var(--warning);width:4px;height:12px"></span>bar height = ideas rejected in the round</span>
-          <span><span class="sw" style="background:var(--band);box-shadow:inset 0 0 0 1px var(--line-2)"></span>plateau window</span>
-          <span><span class="mkb">T</span> trajectory <span class="mkb">A</span> audit <span class="mkb">J</span> Jev <span class="mkb">P</span> positioning</span>
+          <span><b>Gates</b> <span class="mkb">T</span> trajectory <span class="mkb">A</span> audit <span class="mkb">J</span> Jev <span class="mkb">P</span> positioning · <span class="mkb warn">T</span> warning <span class="mkb alert">T</span> alert</span>
         </div>
       </section>
 
@@ -472,19 +480,21 @@ function renderNow() {
 function renderHistory() {
   const rs = S.rounds, W = S.meters.find((m) => m.key === "plateau")?.window || 5;
   $("histSub").textContent = rs.length ? `${rs.length} rounds · ${rs.filter((r) => r.verdict === "SHIPPED").length} shipped` : "";
-  $("strip").hidden = tableView; $("roundTable").hidden = !tableView;
+  $("histGrid").hidden = tableView; $("roundTable").hidden = !tableView;
   if (!rs.length) { $("strip").innerHTML = '<div class="empty">No history yet.</div>'; return; }
   if (!tableView) {
     const atEnd = $("strip").scrollLeft + $("strip").clientWidth >= $("strip").scrollWidth - 4;
-    const maxR = Math.max(1, ...rs.map((r) => r.rejects || 0));
-    const win = new Set(rs.filter((r) => r.verdict).slice(-W).map((r) => r.n));
+    const fin = rs.filter((r) => r.verdict).slice(-W).map((r) => r.n), win = new Set(fin);
+    $("winLabel").textContent = `last ${W}`;
     $("strip").innerHTML = rs.map((r) => {
-      const v = verdictOf(r) || "NOOP", h = ((r.rejects || 0) / maxR) * 42;
-      const marks = r.gates.map((g) => `<span class="mkb ${gateClass(g.verdict)}">${{ traj: "T", audit: "A", jev_same: "J", position: "P" }[g.type]}</span>`).join("");
-      return `<div class="rcol ${win.has(r.n) ? "inwin" : ""}" role="listitem">
-        <div class="barcell" aria-hidden="true"><span class="bv">${r.rejects ? r.rejects : ""}</span><div class="bar" style="height:${h}px"></div><div class="base"></div></div>
-        <button class="tile s-${v}" data-round="${r.n}" aria-current="${selected === r.n}" aria-label="Round ${r.n}: ${WORD[v] || v}, ${r.rejects || 0} ideas rejected">
-          <span class="mk">${marks}</span><span class="no">${r.n}</span><span class="ic">${ICON[v] || "?"}</span></button></div>`;
+      const v = verdictOf(r) || "NOOP", n = r.rejects || 0;
+      const dots = n ? "<i></i>".repeat(Math.min(n, 4)) + (n > 4 ? `<b>+${n - 4}</b>` : "") : '<span class="none"></span>';
+      const marks = r.gates.length ? r.gates.map((g) => `<span class="mkb ${gateClass(g.verdict)}">${{ traj: "T", audit: "A", jev_same: "J", position: "P" }[g.type]}</span>`).join("") : '<span class="none"></span>';
+      const wc = win.has(r.n) ? `on${r.n === fin[0] ? " first" : ""}${r.n === fin[fin.length - 1] ? " last" : ""}` : "";
+      return `<div class="rcol" role="listitem">
+        <button class="tile s-${v}" data-round="${r.n}" aria-current="${selected === r.n}" aria-label="Round ${r.n}: ${WORD[v] || v}, ${n} ideas rejected">
+          <span class="no">${r.n}</span><span class="ic">${ICON[v] || "?"}</span></button>
+        <div class="rej" aria-hidden="true">${dots}</div><div class="gts" aria-hidden="true">${marks}</div><div class="wcell ${wc}" aria-hidden="true"></div></div>`;
     }).join("");
     if (atEnd) $("strip").scrollLeft = $("strip").scrollWidth;   // follow the newest round unless the user scrolled back
   } else {

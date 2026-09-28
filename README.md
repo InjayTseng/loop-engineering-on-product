@@ -100,7 +100,7 @@ How to read it: yellow diamonds are **gates** — each judgment goes to an indep
 ![Loop dashboard, simulated run: round 4 is in D (develop) after a RESET; round 2 was fully rejected; in round 3 Jev flagged a repeated tactic and the early trajectory check returned REDIRECT](docs/img/dashboard-live.png)
 
 - **Now:** the round, the node on C→R→F→S→D→B→V→Y it has reached, and how long the step and the round have taken.
-- **History:** each round's result, with the number of ideas rejected inside it and the gate events (T / A / J / P).
+- **History:** each round's result, with the number of ideas rejected inside it the gate events (T / A / J / P), and the rounds inside the plateau window, each on its own labelled row.
 - **Stop conditions:** how far each of the driver's four stop thresholds is from firing, computed with the same rules as `scripts/run-loop.sh`.
 - **Ideas and Jev:** every idea in the ledger with its status, and the latest Jev calls.
 
