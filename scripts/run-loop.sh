@@ -207,6 +207,25 @@ jev_same_tactic() {   # $1 round
   say "  · jev same-tactic: ${J:-<no JEV line>}"; emit jev_same "round#=$1" "line=$J"
   [ "$JEV_MODE" = "prefilter" ] && [ "$(echo "$J" | sed -E 's/^[[:space:]]*JEV:[[:space:]]*([A-Z_]+).*/\1/')" = "SAME" ]; }
 
+# --- Jev claim-evidence check (optional, docs/09-jev.md) --------------------------------------
+# Is the validator's PASS backed by what it actually ran (its tool outputs in gates.jsonl)? Jev can
+# only TRIGGER a fresh, independent re-validation; whether the round counts as shipped is decided by
+# that validator's VERDICT, under the same rule as any other validator hand-back.
+jev_claim_check() {   # $1 round → 0 = re-validate (prefilter + UNSUPPORTED / CONTRADICTED)
+  [ "$JEV_MODE" = "off" ] && return 1
+  local J; J=$("$JEV_BIN" claim-evidence --run "$RUN_ID" --round "$1" 2>/dev/null | tr -d '`' | grep -E '^[[:space:]]*JEV:' | tail -1)
+  say "  · jev claim-evidence: ${J:-<no JEV line>}"; emit jev_claim "round#=$1" "line=$J"
+  [ "$JEV_MODE" = "prefilter" ] || return 1
+  case "$(echo "$J" | sed -E 's/^[[:space:]]*JEV:[[:space:]]*([A-Z_]+).*/\1/')" in UNSUPPORTED|CONTRADICTED) return 0 ;; esac
+  return 1; }
+revalidate() {   # $1 round → 0 when a fresh validator returns PASS
+  local rlog="$LOGDIR/reval-$(pad "$1").log"
+  say "  · re-validation @ round $1 (the validator's PASS is not backed by its own evidence) -> $rlog"; emit reval_start "round#=$1"
+  run_claude "$rlog" "$LOOP_MODEL" "Spawn the $GATE_VALIDATOR_AGENT subagent (.claude/agents/$GATE_VALIDATOR_AGENT.md) to validate, independently and from scratch, the change in the latest commit (git show HEAD) against its PRP (the PRPs/*.md file that commit adds or changes). It must run BUILD_CMD from loop.config.env itself and observe the PRP's Validator CLAIM directly; earlier validation of this change does not count. Do not edit any files. Report its VERDICT: line verbatim as your last line."
+  local R; R=$(resline "$rlog" VERDICT); say "    ${R:-<no VERDICT line>}"
+  record_gates "$rlog" reval "$1" "$R"; emit reval "round#=$1" "verdict=$(verdict "$rlog" VERDICT)" "line=$R"
+  [ "$(verdict "$rlog" VERDICT)" = "PASS" ]; }
+
 park_for_human() { echo "WAITING_FOR_P: $1" > "$LOGDIR/state"; emit park "reason=$1"; say "=== PARKED: $1 — positioning needs a human (/position). State is in $LOGDIR/state. ==="; }
 
 START=$(git rev-parse HEAD)
@@ -265,6 +284,9 @@ EOF
     elif [ "$g_val" -eq 0 ] || [ "$g_pass" -ne 1 ]; then
       say "     claimed SHIPPED but the last $GATE_VALIDATOR_AGENT verdict is not PASS ($GATE_VALIDATOR_AGENT hand-backs=$g_val; agents recorded: $g_seen) — counting as NOOP"; V="NOOP"
     fi
+  fi
+  if [ "$V" = "SHIPPED" ] && [ "$STREAM" = 1 ] && [ "$g_pass" = 1 ] && jev_claim_check "$i"; then
+    revalidate "$i" || { say "     re-validation did not PASS — counting as NOOP"; V="NOOP"; }
   fi
 
   case "$V" in
