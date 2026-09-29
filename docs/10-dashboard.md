@@ -14,7 +14,7 @@ node scripts/dashboard/serve.mjs            # opens http://127.0.0.1:4400, refre
 |---|---|---|
 | Status pill + banner | Is it running? Has it stopped? Why? | `.loop/run.pid` (is the process alive), `.loop/state` (`WAITING_FOR_P`), `stop` / `park` / `done` events |
 | Now | Which round, which step of C→R→F→S→D→B→V→Y, how long this step has taken; T / P / deep C light up while the driver runs them | `round_start` and `step`, `*_start` in `events.jsonl` |
-| History | Each round's result (✓ shipped / ✕ fully rejected / ! NOOP), how many ideas were rejected inside it, which rounds had gate events (T / A / J / P; red and yellow mean STOP / REDIRECT and the like) | `round_end`, `traj`, `audit`, `jev_same`, `position` |
+| History | Each round's result (✓ shipped / ✕ fully rejected / ! NOOP), how many ideas were rejected inside it, which rounds had gate events (T / A / J / P; red and yellow mean STOP / REDIRECT and the like), and which finished rounds the plateau window currently covers. Each signal is its own labelled row under the round tiles | `round_end`, `traj`, `audit`, `jev_same`, `position` |
 | Round N | Category, funnel, commit, a timeline of every step, the gates' original text, the round's PRP / brief / round log | the same, plus `git show --name-only <commit>` |
 | Stop conditions | How far each of the driver's four stop thresholds is from firing | recomputed from events, **with the same rules as `scripts/run-loop.sh`** (tests check them rule by rule) |
 | Ideas | The status of every idea in the ledger, with Jev fast-rejects marked separately | `LEDGER` (default `.claude/tasks/_idea_ledger.md`) |
