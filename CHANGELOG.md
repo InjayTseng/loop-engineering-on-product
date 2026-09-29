@@ -1,6 +1,6 @@
 # Changelog
 
-Newest first. Commit ids link a change to its tests and its reasoning. Updating an adopted repo: `scripts/loop-kit.sh update <repo>` (see [docs/08-adopt.md](docs/08-adopt.md#updating-later)).
+Newest first. Commit ids link a change to its tests and its reasoning. **v3.1** (git tag `v3.1`) is everything from 2026-09-27 to 2026-09-29 below; **v3** is the baseline at the bottom. Updating an adopted repo: `scripts/loop-kit.sh update <repo>` (see [docs/08-adopt.md](docs/08-adopt.md#updating-later)).
 
 ## 2026-09-29 — hardened by the first live adoption
 
