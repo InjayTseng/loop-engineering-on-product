@@ -180,10 +180,16 @@ function task(name, a, { check, pick }) {
       const claim = (rec.report || "").replace(/`/g, "").match(/^\s*CLAIM:\s*(.+)$/m)?.[1]?.trim();
       if (!claim) return { pre: ["ESCALATE", `the ${agent} report has no CLAIM: line`] };
       const ev = rec.evidence || [];
-      // Deterministic first (regex before model, as in jev-belay): did the correctness gate run at all?
-      const buildTok = String(process.env.BUILD_CMD || "").split(/\s+/).filter(Boolean).sort((x, y) => y.length - x.length)[0];
-      if (buildTok && !ev.some((e) => String(e.input || "").includes(buildTok)))
-        return { pre: ["UNSUPPORTED", `the ${agent} never ran BUILD_CMD (${buildTok}) before its PASS; re-validate`] };
+      // Deterministic first (regex before model, as in jev-belay): did the validator run a correctness check
+      // at all? BUILD_CMD counts by its script (not its output path — a validator may write its screenshot
+      // elsewhere), and so does any command listed in CHECK_CMDS (e.g. a fuller e2e script).
+      const scriptOf = (cmd) => {
+        const toks = String(cmd || "").split(/\s+/).filter((t) => t && !t.startsWith("-") && !/^\/(tmp|private\/tmp)\//.test(t));
+        return toks.find((t) => /\.(sh|mjs|js|cjs|py|rb|swift)$/.test(t) || t.includes("/")) || toks.sort((x, y) => y.length - x.length)[0];
+      };
+      const checks = [scriptOf(process.env.BUILD_CMD), ...String(process.env.CHECK_CMDS || "").split(/\s+/)].filter(Boolean);
+      if (checks.length && !ev.some((e) => checks.some((c) => String(e.input || "").includes(c))))
+        return { pre: ["UNSUPPORTED", `the ${agent} ran none of the correctness checks (${checks.join(", ")}) before its PASS; re-validate`] };
       // Only a file READ of an image counts as "looked at a screenshot" — BUILD_CMD itself names the
       // screenshot path it writes, and that is not a look.
       const images = ev.filter((e) => /^(Read|View|view_image)$/i.test(String(e.tool || "")) && /\.(png|jpe?g|webp|gif)\b/i.test(String(e.input || "")))

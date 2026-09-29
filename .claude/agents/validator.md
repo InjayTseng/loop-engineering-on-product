@@ -36,6 +36,11 @@ routes back to the spec step instead of the builder.
 3. Verify the SPECIFIC claim and each success criterion against what you actually observed —
    not "it runs" but "the exact thing the PRD promised is present and behaves as described".
    Run the PRD's own validation commands (lint / unit / integration levels) and record results.
+   Show the claim in your own command output: a total like "180 tests passed" proves no specific
+   behavior. If a test covers the CLAIM, print that test's result (e.g. `grep -i '<behavior>'
+   /tmp/loop-tests.txt` after an adapter run with IOS_TEST=1, or run that one test). If you rely
+   on a screenshot, also print the text you read on it where you can (accessibility labels, page
+   text). What is not in your tool output did not happen for anyone checking your PASS later.
 3b. Jev label check (only when `JEV_MODE` is not `off`; docs/09-jev.md): for each touched CTA,
    run `scripts/jev/jev.mjs label-promise --label "<label>" --observed "<what you saw it do>"`
    and put the `JEV:` line in EVIDENCE. `JEV: MISMATCH` means axis 4 fails, with that line as

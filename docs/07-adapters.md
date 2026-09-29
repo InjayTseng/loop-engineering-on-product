@@ -32,6 +32,8 @@ Install: `npm i -D playwright` (it uses `channel: 'chrome'`, so no browser downl
 
 Set `IOS_PROJECT` / `IOS_SCHEME` / `IOS_BUNDLE_ID` / `IOS_SIM` in `loop.config.env`.
 
+**Make the evidence readable.** Set `IOS_TEST="1"` and the adapter also runs the scheme's tests and writes one line per test to `/tmp/loop-tests.txt` (`PASSED Suite/testName()`), printing only the totals and any failures. The validator is told to grep that file for the test that covers the CLAIM, so its evidence shows the behavior itself rather than "180 passed" plus a screenshot — which no text-based check (Jev `claim-evidence`) and no later reader can see into. Measured on a live iOS run: three `claim-evidence` flags came from validators whose only evidence was code reading, a test total, and screenshots. If you keep your own adapter, reuse the parser: `scripts/adapters/ios-shot.sh --list-tests <result.xcresult>`.
+
 **Give iOS rounds more time.** One build-and-screenshot check takes 3–5 minutes on a simulator, end-to-end runs longer, so a round that gets a validator FAIL and goes through the fix loop can easily pass 30 minutes. Measured on a live iOS run: a round with two rejected ideas and one validate → fix cycle hit the 1800 s default. Set `ROUND_TIMEOUT="3600"` for iOS adapters. A round that still times out is labelled in `loop.log` and the dashboard with how far it got (`timeout mid-fix`, `timeout before validation`).
 
 ## Recipe for a new setting

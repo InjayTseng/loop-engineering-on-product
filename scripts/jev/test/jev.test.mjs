@@ -128,7 +128,15 @@ expect("nothing shows the CLAIM, no images → UNSUPPORTED", ceRun([vrec([built]
 const shot = { tool: "Read", input: '{"file_path":"/tmp/loop-shot.png"}', output: "" };
 expect("nothing in text but a screenshot was viewed → ESCALATE, never UNSUPPORTED", ceRun([vrec([built, shot])], { observed: { answer: 0.06 }, contradicted: { answer: 0.05 } }),
   /^JEV: ESCALATE — no text evidence for the CLAIM, but 1 image/);
-expect("BUILD_CMD never ran → UNSUPPORTED, decided in code (no answers scripted)", ceRun([vrec([shot])], null), /^JEV: UNSUPPORTED — the validator never ran BUILD_CMD/);
+expect("no correctness check ran → UNSUPPORTED, decided in code (no answers scripted)", ceRun([vrec([shot])], null), /^JEV: UNSUPPORTED — the validator ran none of the correctness checks \(scripts\/adapters\/web-check\.mjs\)/);
+// a live iOS false flag: the validator validated with a fuller e2e script instead of BUILD_CMD itself
+const e2e = { tool: "Bash", input: '{"command":"scripts/e2e-ios.sh 2>&1 | tail -6"}', output: "** TEST SUCCEEDED **" };
+expect("a command listed in CHECK_CMDS counts as the check", ceRun([vrec([e2e])], seen, { CHECK_CMDS: "scripts/e2e-ios.sh" }), /^JEV: PASS/);
+expect("… and without CHECK_CMDS it does not", ceRun([vrec([e2e])], null), /^JEV: UNSUPPORTED — the validator ran none/);
+// BUILD_CMD counts by its script, not its output path: the validator may write its screenshot elsewhere
+const iosBuild = "scripts/adapters/ios-check.sh /tmp/captionfly-ios-screenshot-output.png";
+const iosRan = { tool: "Bash", input: '{"command":"scripts/adapters/ios-check.sh /tmp/val-shot.png 2>&1 | tail -5"}', output: '{"ok":true}' };
+expect("BUILD_CMD matched by its script even with a different output path", ceRun([vrec([iosRan])], seen, { BUILD_CMD: iosBuild }), /^JEV: PASS/);
 expect("no validator record for the round → ESCALATE", ceRun([{ ...vrec([built]), round: 3 }], seen), /^JEV: ESCALATE — no validator record/);
 expect("a report without a CLAIM: line → ESCALATE", ceRun([vrec([built], "VERDICT: PASS")], seen), /^JEV: ESCALATE — the validator report has no CLAIM/);
 expect("the last validator hand-back of the round is the one checked", ceRun([vrec([shot]), vrec([built])], seen), /^JEV: PASS/);
