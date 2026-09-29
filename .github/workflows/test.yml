@@ -20,6 +20,8 @@ jobs:
         run: shellcheck -S error scripts/*.sh scripts/adapters/*.sh
       - name: driver (stubbed claude)
         run: bash scripts/test-driver.sh
+      - name: loop-kit (install / update)
+        run: bash scripts/test-kit.sh
       - name: dashboard
         run: node --test scripts/dashboard/test/*.test.mjs
       - name: jev

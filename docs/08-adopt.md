@@ -4,11 +4,14 @@ Prerequisites: a product that builds; an `origin` remote (every round pushes); t
 
 ## 1. Copy the skeleton
 
+From a checkout of this repo:
+
 ```bash
-cp -R .claude loop.config.env scripts product research PRPs <your-repo>/
+scripts/loop-kit.sh install <your-repo>   # framework files, your starter files, the pre-push hook
 cd <your-repo> && git checkout -b loop
-scripts/install-hooks.sh          # pre-push hook: refuses DEPLOY_BRANCH at the git level
 ```
+
+`loop-kit` copies the framework's scripts, agents, commands, round spec and templates, creates the files that are yours from then on (`loop.config.env`, `product/`, the idea ledger and backlog) only if they do not exist yet, installs the `pre-push` hook, and writes `.loop-kit.lock` — the hash of every framework file as installed. Commit the lock with the rest. (`examples/` and `docs/` stay here.)
 
 `.claude/settings.local.json.example` is a minimal permission allowlist: copy it to `.claude/settings.local.json` (gitignored). It allows only `git push origin loop` and denies `push origin main` and `reset --hard`. Note that it governs interactive mode (`/loop-once`) only. The headless driver runs with `--dangerously-skip-permissions` and does not read it, so headless safety rests on the per-round branch check, the `pre-push` hook (the driver refuses to start without it), and — because `git push --no-verify` skips any hook — branch protection on the remote.
 
@@ -41,6 +44,17 @@ In the morning, read `.loop/loop.log`: what shipped, what was rejected, what the
 
 Optional, once the loop runs well without it: Jev pre-checks can fast-reject obvious bad ideas before the LLM gates. Follow the rollout order in [09-jev](09-jev.md) — offline eval, then a shadow night, then prefilter. To follow a run live, use the dashboard in [10-dashboard](10-dashboard.md).
 
+## Updating later
+
+```bash
+scripts/loop-kit.sh status <your-repo>    # what an update would do; changes nothing
+scripts/loop-kit.sh update <your-repo>    # take the new framework version
+```
+
+A framework file you have not changed since it was installed is replaced. A file you *have* changed — a customised agent, your own spec tweaks — is left alone, and the new version is written next to it as `<file>.kit-new` for you to merge (exit code 3 tells a script something is waiting); `--force` takes the framework's version and keeps yours as `<file>.kit-bak`. Executable bits are always restored. Your files are never touched, and config keys the framework has gained are listed for you to add by hand. This exists because hand-syncing went wrong on the first real adopter: an executable bit was lost twice, and fixes were skipped to avoid overwriting local changes.
+
+After an update: `(cd scripts/jev && npm ci)` if you use Jev, then `bash scripts/test-driver.sh`.
+
 ## Acceptance: when a loop counts as installed
 
 - [ ] The driver REFUSEs on `main`, and REFUSEs without the `pre-push` hook
@@ -57,4 +71,4 @@ Optional, once the loop runs well without it: Jev pre-checks can fast-reject obv
 
 - Run the loop on the live branch
 - Skip the PRD to save time (node V goes blind)
-- Start changing the generic layer from this one setting — run a full night first and write down lesson 11
+- Start changing the generic layer from this one setting — run a full night first and write down the next lesson (they are numbered in [06-lessons](06-lessons.md))

@@ -167,7 +167,7 @@ The driver reads only these lines, but with `jq` installed it also records every
 
 - How each node works: [01-state-and-positioning](01-state-and-positioning.md) → [02-research](02-research.md) → [03-prd](03-prd.md) → [04-dev-and-validate](04-dev-and-validate.md)
 - The driver and stopping: [05-loop](05-loop.md)
-- Ten hard lessons and the v1 → v2 → v2.1 numbers: [06-lessons](06-lessons.md)
+- Seventeen hard lessons, from v1 to the first live adoption: [06-lessons](06-lessons.md)
 - Change products by changing the adapter: [07-adapters](07-adapters.md); install into your repo in five steps: [08-adopt](08-adopt.md)
 - Optional: fast-reject with Jev in front of the LLM gates: [09-jev](09-jev.md)
 - See what the loop is doing: [10-dashboard](10-dashboard.md) (`events.jsonl` is written by the driver and `scripts/loop-event.sh`; it is not a result line and no gate reads it)

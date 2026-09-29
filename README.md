@@ -1,5 +1,7 @@
 # loop-engineering-on-product
 
+[![Tests](https://github.com/InjayTseng/loop-engineering-on-product/actions/workflows/test.yml/badge.svg)](https://github.com/InjayTseng/loop-engineering-on-product/actions/workflows/test.yml) [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+
 **An autonomous product loop for Claude Code that keeps improving a real product overnight — and knows when to stop and ask.**
 
 Each round, a fresh agent looks at the product as it is today, researches one idea, has it judged for value *before* writing any code, writes a PRD, builds it, has it validated against that PRD by a *different* agent, and pushes it to an isolated branch. A deterministic shell driver runs the rounds, reads one result line per step, and decides when the loop has run out of good ideas. Nothing reaches your live branch unless a human merges it.
@@ -179,16 +181,17 @@ Past runs can be replayed from their `loop.log`. See [`docs/10-dashboard.md`](do
 |---|---|---|---|---|
 | [v2, web](examples/web-v2-20-rounds/) | single-file fortune-telling site | 20 overnight (4h10m) | 20 shipped, 17 ideas rejected by the value gate, 7 categories, trajectory 4× CONTINUE, live branch never touched | plateau on rejection rate, the trust gate, the label-promise axis |
 | [v1, iOS](examples/ios-v1-112-iterations/) | asset-tracking app | 112 | high output, self-approved, pushed to main | the contrast: what a loop without a value gate looks like |
+| v3, live (logs not included) | an iOS app and its backend — the first external adopter | five runs over three nights | last night 14 of 14 rounds shipped (backend 8/8, iOS 6/6), each with a validator PASS, no NOOPs; an interrupted round resumed and shipped the next night | seven harness bugs found by live runs, each fixed the same day with a test (lessons 11–17) |
 
-[`docs/06-lessons.md`](docs/06-lessons.md) has the ten lessons behind the design, with numbers — including a bash 3.2 bug that meant the v2.1 plateau could never fire, found only by testing the driver with a stub.
+[`docs/06-lessons.md`](docs/06-lessons.md) has the seventeen lessons behind the design, with numbers — including a bash 3.2 bug that meant the v2.1 plateau could never fire (found only by testing the driver with a stub), and the seven the first live adoption taught: a session limit read as a broken adapter, validated ships vetoed by a check that could not see background agents, a redirect that lost its direction.
 
 ## Quick start
 
 Requirements: a product that builds, an `origin` remote, the `claude` CLI, Node ≥ 18. Optional: `jq` (gate recording); a TypeSafe, OpenRouter or AI Gateway API key (Jev pre-checks).
 
 ```bash
-git checkout -b loop                    # never run on your live branch
-scripts/install-hooks.sh                # pre-push hook: refuses the live branch at the git level
+scripts/loop-kit.sh install <your-repo> # from this checkout: framework files, starter files, pre-push hook
+cd <your-repo> && git checkout -b loop  # never run on your live branch
 # fill in loop.config.env: north star, funnel, categories, DEPLOY_BRANCH, BUILD_CMD
 #   (unfilled placeholders make the first audit report BROKEN)
 /audit                                  # rewrite product/state.md
@@ -197,7 +200,7 @@ scripts/install-hooks.sh                # pre-push hook: refuses the live branch
 scripts/run-loop.sh 20                  # overnight; tail -f .loop/loop.log
 ```
 
-In the morning: read `.loop/loop.log`, review the loop branch's commits one by one, and merge what you want. Full installation guide with an acceptance checklist: [`docs/08-adopt.md`](docs/08-adopt.md).
+In the morning: read `.loop/loop.log`, review the loop branch's commits one by one, and merge what you want. Later, `scripts/loop-kit.sh update <your-repo>` brings the framework up to date without overwriting anything you changed. Full installation guide with an acceptance checklist: [`docs/08-adopt.md`](docs/08-adopt.md).
 
 Optional Jev pre-checks — follow the rollout order in [`docs/09-jev.md`](docs/09-jev.md):
 
@@ -222,11 +225,13 @@ Start with [`docs/00-pipeline.md`](docs/00-pipeline.md): it defines the graph �
 | [03 PRD](docs/03-prd.md) | A PRP every round, depth set by size; one observable CLAIM |
 | [04 Build, test, validate, ship](docs/04-dev-and-validate.md) | The `BUILD_CMD` correctness gate + the independent `validator`'s 9 axes (including label-promise) |
 | [05 The outer loop](docs/05-loop.md) | The driver, stop conditions (rejection-rate plateau), cadence, cost routing, gate records |
-| [06 Ten hard lessons](docs/06-lessons.md) | v1 → v2 → v2.1 → v3, including the bash 3.2 bug that silently disabled the plateau |
+| [06 Seventeen hard lessons](docs/06-lessons.md) | v1 → v2 → v2.1 → v3 → the first live adoption, including the bash 3.2 bug that silently disabled the plateau |
 | [07 Adapters](docs/07-adapters.md) | The web and iOS adapters + four questions for a new setting |
 | [08 Install into your repo](docs/08-adopt.md) | Five steps and an acceptance checklist |
 | [09 Jev pre-checks (optional)](docs/09-jev.md) | A typed-judgment model that fast-rejects in front of the LLM gates: off → shadow → prefilter, offline eval first |
 | [10 Developer dashboard](docs/10-dashboard.md) | `node scripts/dashboard/serve.mjs`: a local read-only page with the history, the current step, and the distance to each stop threshold |
+
+What changed and when, with commit ids: [`CHANGELOG.md`](CHANGELOG.md).
 
 ## Repository layout
 
@@ -258,6 +263,8 @@ Start with [`docs/00-pipeline.md`](docs/00-pipeline.md): it defines the graph �
 │   ├── jev/                  # optional Jev pre-checks: jev.mjs (4 tasks) · ledger.mjs · eval-backlog.mjs ·
 │   │                         #   shadow-report.mjs · test/ (npm test)
 │   ├── dashboard/            # serve.mjs · state.mjs · index.html (local, read-only) · test/
+│   ├── loop-kit.sh           # install into a product repo / update it later without overwriting your changes
+│   ├── test-kit.sh           # tests for loop-kit.sh
 │   ├── install-hooks.sh      # pre-push hook: refuses DEPLOY_BRANCH
 │   └── adapters/             # web-check.mjs · ios-shot.sh
 ├── loop.config.env           # the one file you fill in
@@ -270,10 +277,10 @@ Do not copy the driver from `examples/*/as-run/`: those are the versions as they
 
 ## Status and limits
 
-- **Proven by real runs (N=2):** the value gate, the independent validator, branch isolation, the result-line protocol, the web and iOS adapters.
-- **Designed but not yet proven by a real run (v3, N=0):** the current-state node C, the positioning node P and its autonomous mode, a PRD every round. [`docs/06-lessons.md`](docs/06-lessons.md) lists what each still needs to show.
+- **Proven by real runs:** the value gate, the independent validator, branch isolation, the result-line protocol, the web and iOS adapters (N=2); and, on the first live adoption (N=1), resuming an interrupted round from Step 0, gate records, and the driver's cross-check of them.
+- **Designed but not yet proven by a real run:** the positioning node P and its autonomous mode (no live run has reached a plateau or a trajectory STOP), the cost-benefit of a deep audit every 5 rounds, and whether a PRD every round reduces label-promise escapes. [`docs/06-lessons.md`](docs/06-lessons.md) lists what each still needs to show.
 - **The plateau rule is tested, not observed.** The stub tests prove it stops when it should; no real run has triggered it yet.
-- **Jev pre-checks are N=0.** Wired up and tested with stubs and a mock backend; not yet shown to be worth it on a real run. Real use has already surfaced two self-match bugs (both fixed, with regression tests) — see [09-jev](docs/09-jev.md).
+- **Jev pre-checks are not yet shown to be worth it.** They have run live in prefilter mode (median 285–337 ms per call; label-promise about 1 s) and have not yet blocked a bad idea; on iOS, `claim-evidence` flagged validator PASSes whose evidence did not actually show the claim, which led to better evidence rather than a quieter check. No shadow night has been run, so there is no false-reject rate yet — see [09-jev](docs/09-jev.md).
 - **Cost:** an overnight run with subagents can cost $50–200. See the cost routing in [05-loop](docs/05-loop.md#model-and-cost-routing).
 
 ## GitHub Actions (optional)
