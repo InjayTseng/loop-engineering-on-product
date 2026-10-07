@@ -170,5 +170,6 @@ The driver reads only these lines, but with `jq` installed it also records every
 - Seventeen hard lessons, from v1 to the first live adoption: [06-lessons](06-lessons.md)
 - Change products by changing the adapter: [07-adapters](07-adapters.md); install into your repo in five steps: [08-adopt](08-adopt.md)
 - Optional: fast-reject with Jev in front of the LLM gates: [09-jev](09-jev.md)
+- Measure a change against a baseline: [11-eval](11-eval.md)
 - See what the loop is doing: [10-dashboard](10-dashboard.md) (`events.jsonl` is written by the driver and `scripts/loop-event.sh`; it is not a result line and no gate reads it)
 - Real runs: `examples/web-v2-20-rounds/` (v2) and `examples/ios-v1-112-iterations/` (the v1 contrast)

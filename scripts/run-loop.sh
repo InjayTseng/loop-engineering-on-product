@@ -66,7 +66,7 @@ LIMIT_WAIT="${LIMIT_WAIT:-off}"; LIMIT_MAX_WAIT="${LIMIT_MAX_WAIT:-28800}"
 case "$LIMIT_WAIT" in off|*[!0-9]*) [ "$LIMIT_WAIT" = off ] || { echo "REFUSE: LIMIT_WAIT must be off or a number of seconds (got '$LIMIT_WAIT')."; exit 1; } ;; esac
 # What a round may never change: its own judges, the harness, and the objective (node P owns positioning).
 # Only the loop's own files under scripts/ — the product this is copied into may keep its code there too.
-LOOP_SCRIPTS="scripts/run-loop.sh scripts/gate-log.sh scripts/loop-event.sh scripts/install-hooks.sh scripts/test-driver.sh scripts/adapters scripts/jev scripts/dashboard"
+LOOP_SCRIPTS="scripts/run-loop.sh scripts/gate-log.sh scripts/loop-event.sh scripts/install-hooks.sh scripts/test-driver.sh scripts/adapters scripts/jev scripts/dashboard scripts/eval"
 PROTECTED_PATHS="${PROTECTED_PATHS:-.claude/agents .claude/commands $LOOP_SPEC $LOOP_SCRIPTS .github $CONFIG $POSITIONING}"
 # The subagent names the driver cross-checks in .loop/gates.jsonl (they must match .claude/agents/*.md `name:`).
 GATE_VALUE_AGENT="${GATE_VALUE_AGENT:-value-critic}"; GATE_VALIDATOR_AGENT="${GATE_VALIDATOR_AGENT:-validator}"
@@ -115,7 +115,29 @@ run_claude_once() {  # $1 log (the reply the driver parses), $2 model, $3 prompt
     sleep 1; t=$((t+1))
   done
   wait "$pid" 2>/dev/null; kill -TERM -- "-$pid" 2>/dev/null; CUR_PG=""
-  [ "$STREAM" = 1 ] && reply_text "$raw" >"$1"; return 0; }
+  [ "$STREAM" = 1 ] && { reply_text "$raw" >"$1"; record_usage "$1"; }; return 0; }
+# What each claude -p call cost, from its transcript's `result` event(s), to .loop/usage.jsonl — the
+# denominator for any eval ("$ per merged change"). One row per call; kind and round come from the log name
+# (round-003, audit-005, traj-, position-, reval-). A background agent can wake the session again, giving
+# several results: take each session's last (its totals are cumulative) and add sessions. A call killed by
+# the timeout or cut by a usage limit has no result — its cost is null (unknown), never 0.
+record_usage() {  # $1 log
+  local base kind rnd; base=$(basename "$1" .log); kind=${base%-*}; rnd=${base##*-}
+  jq -R -s -c --arg run "$RUN_ID" --arg kind "$kind" --arg round "$rnd" '
+    split("\n") | map(fromjson? // empty) | map(select(.type == "result")) as $r
+    | ($r | group_by(.session_id) | map(last)) as $l
+    | def sum(f): ($l | map(f // 0) | add // 0);
+    { run: $run, kind: $kind, round: ($round | tonumber? // null), ts: (now | todate), results: ($r | length),
+      cost_usd: (if ($l | length) == 0 then null else sum(.total_cost_usd) end),
+      duration_ms: (if ($l | length) == 0 then null else sum(.duration_ms) end),
+      turns: (if ($l | length) == 0 then null else sum(.num_turns) end),
+      tokens: { input: sum(.usage.input_tokens), output: sum(.usage.output_tokens),
+                cache_read: sum(.usage.cache_read_input_tokens), cache_write: sum(.usage.cache_creation_input_tokens) },
+      models: ([$l[] | (.modelUsage // {}) | to_entries[]] | group_by(.key)
+               | map({key: .[0].key, value: {cost_usd: (map(.value.costUSD // 0) | add), output_tokens: (map(.value.outputTokens // 0) | add)}})
+               | from_entries) }' "${1%.log}.jsonl" >> "$LOGDIR/usage.jsonl" 2>/dev/null || true
+  local c; c=$(tail -1 "$LOGDIR/usage.jsonl" 2>/dev/null | jq -r 'select(.cost_usd != null) | "$\(.cost_usd * 100 | round / 100) · \(.duration_ms / 1000 | round)s · \(.turns) turns"' 2>/dev/null)
+  [ -n "$c" ] && say "    usage: $c"; return 0; }
 # The reply = the transcript's final `result`; for a killed round, a crash, or a plain-text
 # CLAUDE_BIN there is none, so keep every line that is not a JSON event (incl. the TIMEOUT line).
 reply_text() {

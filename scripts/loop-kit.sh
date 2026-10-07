@@ -35,7 +35,7 @@ framework_files() {
   ( cd "$SRC"
     # (loop-kit.sh itself stays here: it always runs from the framework checkout)
     ls scripts/run-loop.sh scripts/gate-log.sh scripts/loop-event.sh scripts/install-hooks.sh scripts/test-driver.sh 2>/dev/null
-    find scripts/adapters scripts/dashboard -type f ! -name '.DS_Store' 2>/dev/null
+    find scripts/adapters scripts/dashboard scripts/eval -type f ! -name '.DS_Store' 2>/dev/null
     find scripts/jev -type f ! -path '*/node_modules/*' ! -name '.DS_Store' 2>/dev/null
     find .claude/agents .claude/commands -type f -name '*.md' 2>/dev/null
     ls .claude/tasks/innovation_loop.md .claude/settings.local.json.example research/TEMPLATE.md 2>/dev/null

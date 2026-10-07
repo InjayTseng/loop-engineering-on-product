@@ -22,6 +22,8 @@ jobs:
         run: bash scripts/test-driver.sh
       - name: loop-kit (install / update)
         run: bash scripts/test-kit.sh
+      - name: eval (labels, baseline)
+        run: node scripts/eval/test/eval.test.mjs
       - name: dashboard
         run: node --test scripts/dashboard/test/*.test.mjs
       - name: jev

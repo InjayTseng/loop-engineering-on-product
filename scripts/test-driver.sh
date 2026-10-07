@@ -441,4 +441,28 @@ else
   echo "  skip (jq not installed)"
 fi
 
+echo "### 21 every claude -p call's cost goes to .loop/usage.jsonl (the eval's denominator)"
+if command -v jq >/dev/null; then
+  # A background wake-up gives a second result in the same session: its totals are cumulative, so only the
+  # last one counts. The result shapes are the CLI's (total_cost_usd, duration_ms, num_turns, modelUsage).
+  cat > "$T/bin/claude-cost" <<'S'
+#!/usr/bin/env bash
+echo x >> shipped.txt; git add shipped.txt; git -c user.name=t -c user.email=t@t commit -qm "loop: stub ship"
+echo '{"type":"result","session_id":"s1","total_cost_usd":1.25,"duration_ms":60000,"num_turns":10,"usage":{"input_tokens":5,"output_tokens":100},"modelUsage":{"claude-opus-5-5":{"costUSD":1.0,"outputTokens":80},"claude-sonnet-5-5":{"costUSD":0.25,"outputTokens":20}},"result":"working"}'
+echo '{"type":"result","session_id":"s1","total_cost_usd":2.0,"duration_ms":90000,"num_turns":14,"usage":{"input_tokens":7,"output_tokens":150},"modelUsage":{"claude-opus-5-5":{"costUSD":1.6,"outputTokens":120},"claude-sonnet-5-5":{"costUSD":0.4,"outputTokens":30}},"result":"LOOP_RESULT: SHIPPED | category=a | step=s | rejects=0"}'
+S
+  chmod +x "$T/bin/claude-cost"; rm -rf .loop
+  env CLAUDE_BIN="$T/bin/claude-cost" SKIP_START_AUDIT=1 scripts/run-loop.sh 1 >/dev/null 2>&1
+  expect "usage: \\\$2 · 90s · 14 turns"
+  jq -e -s 'length == 1 and .[0].kind == "round" and .[0].round == 1 and .[0].results == 2 and .[0].cost_usd == 2
+      and .[0].turns == 14 and .[0].tokens.output == 150 and .[0].models["claude-opus-5-5"].cost_usd == 1.6' .loop/usage.jsonl >/dev/null \
+    && echo "  ok   one row per call; the session's last result counts (cumulative), per-model cost kept" \
+    || { echo "  FAIL usage row"; cat .loop/usage.jsonl; FAIL=1; }
+  hang_case "value-critic:ACCEPT validator:FAIL"   # from scenario 19: killed by ROUND_TIMEOUT, no result event
+  jq -e -s '.[0].kind == "round" and .[0].results == 0 and .[0].cost_usd == null' .loop/usage.jsonl >/dev/null \
+    && echo "  ok   a timed-out call's cost is null (unknown), never 0" || { echo "  FAIL timeout usage"; cat .loop/usage.jsonl; FAIL=1; }
+else
+  echo "  skip (jq not installed)"
+fi
+
 [ "$FAIL" = 0 ] && echo "ALL DRIVER TESTS PASSED" || { echo "DRIVER TESTS FAILED"; exit 1; }

@@ -2,6 +2,14 @@
 
 Newest first. Commit ids link a change to its tests and its reasoning. **v3.1** (git tag `v3.1`) is everything from 2026-09-27 to 2026-09-29 below; **v3** is the baseline at the bottom. Updating an adopted repo: `scripts/loop-kit.sh update <repo>` (see [docs/08-adopt.md](docs/08-adopt.md#updating-later)).
 
+## Unreleased — eval, step 1: record and label
+
+- **Cost per call**: every `claude -p` call's cost, duration, turns, tokens and cost per model go to `.loop/usage.jsonl`, with a one-line summary in `loop.log`; a call with no result (timeout, usage limit) is `null`, never 0.
+- **`scripts/eval/label-outcomes.mjs`**: labels every shipped commit from git — merged, merged-fixed, merged-reverted, reverted, skipped, pending — so gate quality is judged by the human's own decisions, not by another model.
+- **`scripts/eval/baseline.mjs`**: one scorecard — outcomes, value gate, validator escapes, cost per round / shipped / merged, by kind and model.
+- First real baseline (read-only, first adopter): 39 of 39 decided changes merged, none reverted — showing that whole-branch merges make merge rate useless for ranking gates; seeded cases are next. See [docs/11-eval.md](docs/11-eval.md).
+- Tests: `scripts/eval/test/eval.test.mjs` (every label on a fixture repo, the scorecard's arithmetic), driver scenario 21; in CI.
+
 ## 2026-09-29 — hardened by the first live adoption
 
 The framework ran on its first external product — an iOS app and its backend, one framework in two repos. Each item below was found by a live run and fixed the same day, with a test that fails on the old code ([lessons 11–17](docs/06-lessons.md#lessons-from-the-first-live-adoption-v3)).
