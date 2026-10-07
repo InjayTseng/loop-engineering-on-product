@@ -5,8 +5,10 @@ Newest first. Commit ids link a change to its tests and its reasoning. **v3.1** 
 ## Unreleased — eval, steps 1–2: record, label, and seeded gate cases
 
 ### Step 2: seeded gate cases
-- **`scripts/eval/bench.mjs`**: runs the real `value-critic` and `validator` agents (`claude -p --agent`) on 21 cases whose answer is fixed in advance, each in a fresh throwaway repo of a small fixture product, and scores catch rate, false-alarm rate, per-class results and cost; `--repeat` flags unstable cases, `--compare` shows deltas and flipped cases between two runs. Gates run isolated from user settings and MCP servers.
+- **`scripts/eval/bench.mjs`**: runs the real `value-critic` and `validator` agents (`claude -p --agent`) on 35 cases whose answer is fixed in advance, each in a fresh throwaway repo of a small fixture product, and scores catch rate, false-alarm rate, per-class results and cost; `--repeat` flags unstable cases, `--compare` shows deltas and flipped cases between two runs. Gates run isolated from user settings and MCP servers.
 - First baseline (`b10cbe8`, 3 repeats, $1.14): both gates 100% catch, 0% false alarms — at the ceiling, so the bench catches regressions but needs harder cases to show improvements. Three borderline ideas are reported outside every rate. See [docs/11-eval.md](docs/11-eval.md).
+- 14 hard cases (35 in all) — invented numbers inside good ideas, renamed duplicates, non-goals on the right stage; labels one word off, CTAs moved into hidden blocks. Sonnet gates still 100%; on Haiku: value-critic false alarms 0% → 17%, validator catch 100% → 89%, and cost 1.9× higher with ~4× the latency — so moving gates to Haiku would cost more and catch less.
+- A reply with no parseable verdict is kept whole; `--compare` shows an even split across repeats as `split`.
 - Tests: `scripts/eval/test/bench.test.mjs` (stub model: repo setup, parsing, scoring, repeats, compare); in CI.
 
 ### Step 1: record and label

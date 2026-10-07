@@ -16,7 +16,7 @@
 //        node scripts/eval/bench.mjs --report <run.jsonl>
 //        node scripts/eval/bench.mjs --compare <baseline.jsonl> <candidate.jsonl>
 // Env:   CLAUDE_BIN (claude) · BENCH_TIMEOUT (seconds per case, 600) · BENCH_ISOLATE=0 (use your own settings/MCP)
-// Cost:  every case is a real model call — 21 per repeat, about $0.05 each. The report prints what the run cost.
+// Cost:  every case is a real model call — 35 per repeat, about $0.02 each on the Sonnet gates. The report prints what the run cost.
 import { spawn, execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync, appendFileSync } from "node:fs";
@@ -94,7 +94,9 @@ if (argv.includes("--compare")) {
   }
   for (const gate of Object.keys({ ...a, ...b })) if (a[gate]?.borderline_n && b[gate]?.borderline_n)
     console.log(`  ${gate} borderline let through: ${a[gate].borderline_passed}/${a[gate].borderline_n} → ${b[gate].borderline_passed}/${b[gate].borderline_n}`);
-  const majority = (rs, c) => { const v = rs.filter((r) => r.case === c).map((r) => r.got || "none"); return v.sort((p, q) => v.filter((x) => x === q).length - v.filter((x) => x === p).length)[0]; };
+  const majority = (rs, c) => {   // the most common answer; a tie is "split", not whichever sorted first
+    const v = rs.filter((r) => r.case === c).map((r) => r.got || "none"), n = (x) => v.filter((y) => y === x).length;
+    const top = [...new Set(v)].sort((p, q) => n(q) - n(p)); return top.length > 1 && n(top[0]) === n(top[1]) ? "split" : top[0]; };
   const flips = [...new Set([...A, ...B].map((r) => r.case))].filter((c) => A.some((r) => r.case === c) && B.some((r) => r.case === c) && majority(A, c) !== majority(B, c));
   console.log(`  cases whose answer changed: ${flips.length ? flips.map((c) => `${c} ${majority(A, c)}→${majority(B, c)}`).join(" · ") : "none"}`);
   console.log(`  cost: $${A.reduce((s, r) => s + (r.cost_usd || 0), 0).toFixed(2)} → $${B.reduce((s, r) => s + (r.cost_usd || 0), 0).toFixed(2)}`);
@@ -153,7 +155,7 @@ function runCase(c, attempt) {
       rmSync(d, { recursive: true, force: true });
       done({ bench: OUT.split("/").pop(), ts: new Date().toISOString(), case: c.id, gate: c.gate, class: c.class, expect: c.expect, got, correct, attempt,
         cost_usd: last.size ? [...last.values()].reduce((a, r) => a + (r.total_cost_usd || 0), 0) : null, duration_ms: Date.now() - t0, models,
-        agent_sha: sha(join(ROOT, ".claude/agents", `${c.gate}.md`)), model_override: MODEL, framework: FRAMEWORK, reply: text.slice(-600) });
+        agent_sha: sha(join(ROOT, ".claude/agents", `${c.gate}.md`)), model_override: MODEL, framework: FRAMEWORK, reply: text.slice(-600), ...(got ? {} : { reply_full: text }) });   // no verdict: keep all of it, to see why
     });
   });
 }

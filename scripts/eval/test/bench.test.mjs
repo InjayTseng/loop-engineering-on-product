@@ -30,22 +30,19 @@ $ans"
 `);
 chmodSync(stub, 0o755);
 const run = (args, answers) => execFileSync("node", [BENCHJS, ...args], { encoding: "utf8",
-  env: { ...process.env, CLAUDE_BIN: stub, STUB_ANSWERS: JSON.stringify(answers), STUB_COUNT: join(T, "count") } });
-const allRight = {
-  "v-good-starter": "VALUE: ACCEPT", "v-good-prefill": "VALUE: ACCEPT", "v-good-signup-habit": "VALUE: ACCEPT", "v-border-empty-guide": "VALUE: ACCEPT",
-  "v-border-focus": "VALUE: REJECT", "v-border-enter": "VALUE: REJECT", "v-fab-today": "VALUE: REJECT", "v-fab-testimonials": "VALUE: REJECT",
-  "v-dup-streak": "VALUE: REJECT", "v-dup-reminder": "VALUE: REJECT", "v-nongoal-leaderboard": "VALUE: REJECT", "v-nongoal-ads": "VALUE: REJECT",
-  "v-offfunnel-font": "VALUE: REJECT", "v-offfunnel-refactor": "VALUE: REJECT",
-  "val-good-starters": "VERDICT: PASS", "val-good-usage": "VERDICT: PASS", "val-good-prefill": "VERDICT: PASS",
-  "val-bad-share-label": "VERDICT: FAIL", "val-bad-never-shown": "VERDICT: FAIL", "val-bad-regression": "VERDICT: FAIL", "val-bad-syntax": "VERDICT: FAIL",
-};
+  env: { ...process.env, TMPDIR: T, CLAUDE_BIN: stub, STUB_ANSWERS: JSON.stringify(answers), STUB_COUNT: join(T, "count") } });
+// a perfect gate: every case's expected answer (a borderline case is let through once, rejected twice)
+const cases = ["value-critic", "validator"].flatMap((g) => readFileSync(resolve(HERE, `../bench/cases/${g}.jsonl`), "utf8").trim().split("\n").map((l) => JSON.parse(l)));
+const allRight = Object.fromEntries(cases.map((c) => [c.id, `${c.gate === "validator" ? "VERDICT" : "VALUE"}: ${c.expect === "EITHER" ? "REJECT" : c.expect}`]));
+allRight["v-border-empty-guide"] = "VALUE: ACCEPT";
+const N = cases.length, usd = (N * 0.1).toFixed(2);
 
 console.log("### a perfect gate scores 100% catch, 0% false alarms");
 const o1 = join(T, "perfect.jsonl");
 const out1 = run(["--out", o1, "--parallel", "6"], allRight);
-has("last line", out1, /BENCH: value_catch=1\.00 value_false_alarm=0\.00 validator_catch=1\.00 validator_false_alarm=0\.00 usd=2\.10/);
+has("last line", out1, new RegExp(`BENCH: value_catch=1\\.00 value_false_alarm=0\\.00 validator_catch=1\\.00 validator_false_alarm=0\\.00 usd=${usd}`.replace(/(\d)\.(\d)/, "$1\\.$2")));
 const r1 = readFileSync(o1, "utf8").trim().split("\n").map((l) => JSON.parse(l));
-eq("one row per case", r1.length, 21);
+eq("one row per case", r1.length, N);
 has("borderline cases are in no rate, but how many got through is shown", out1, /borderline \(in no rate\): let through 1\/3/);
 eq("a borderline row is neither right nor wrong", r1.filter((r) => r.class === "borderline").map((r) => r.correct), [null, null, null]);
 eq("each throwaway repo: agent file, fixture, 3 history commits, on the loop branch",
@@ -60,9 +57,9 @@ const o2 = join(T, "mixed.jsonl");
 const mixed = { ...allRight, "v-fab-today": "VALUE: ACCEPT", "v-good-prefill": "`VALUE: REJECT`", "val-bad-share-label": "VERDICT: PASS",
   "val-good-usage": "VERDICT: PARTIAL", "val-bad-never-shown": "VERDICT: PARTIAL", "v-dup-streak": "I think this is fine." };
 const out2 = run(["--out", o2], mixed);
-// value-critic: 8 must-reject → 6 caught (fab-today accepted, dup-streak unparsed); 3 good → 1 false alarm
-// validator: 4 must-fail → 3 caught (share-label passed; never-shown PARTIAL counts as caught); 3 good → 1 false alarm (PARTIAL)
-has("scores", out2, /BENCH: value_catch=0\.75 value_false_alarm=0\.33 validator_catch=0\.75 validator_false_alarm=0\.33/);
+// value-critic: 16 must-reject → 14 caught (fab-today accepted, dup-streak unparsed); 3 good → 1 false alarm
+// validator: 9 must-fail → 8 caught (share-label passed; never-shown PARTIAL counts as caught); 4 good → 1 false alarm (PARTIAL)
+has("scores", out2, /BENCH: value_catch=0\.88 value_false_alarm=0\.33 validator_catch=0\.89 validator_false_alarm=0\.25/);
 has("backticked verdicts are parsed", out2, /WRONG v-good-prefill \(good\): expected ACCEPT, got REJECT/);
 has("an unparsed answer is wrong, not skipped", out2, /WRONG v-dup-streak \(duplicate\): expected REJECT, got no verdict/);
 has("per-class breakdown", out2, /fabricated 1\/2/);
@@ -75,11 +72,14 @@ has("an unstable case is reported with its answers", out3, /unstable cases.*v-fa
 
 console.log("### --compare");
 const cmp = execFileSync("node", [BENCHJS, "--compare", o1, o2], { encoding: "utf8" });
-has("metric deltas", cmp, /value-critic catch_rate: 100% → 75% \(-25 pts\)/);
+has("metric deltas", cmp, /value-critic catch_rate: 100% → 88% \(-12 pts\)/);
 has("the cases whose answer changed", cmp, /v-fab-today REJECT→ACCEPT/);
+const o4 = join(T, "tie.jsonl");
+run(["--out", o4, "--only", "v-fab-today", "--repeat", "2"], { "v-fab-today": ["VALUE: REJECT", "VALUE: ACCEPT"] });
+has("a 1–1 tie across repeats is shown as split", execFileSync("node", [BENCHJS, "--compare", o1, o4], { encoding: "utf8" }), /v-fab-today REJECT→split/);
 
+// the bench made its throwaway repos under T (TMPDIR), so a real bench running alongside does not count
+eq("throwaway repos are removed", readdirSync(T).filter((f) => f.startsWith("loop-bench-")).length, 0);
 rmSync(T, { recursive: true, force: true });
-const leftovers = readdirSync(tmpdir()).filter((f) => f.startsWith("loop-bench-")).length;
-eq("throwaway repos are removed", leftovers, 0);
 console.log(fail ? "BENCH TESTS FAILED" : "ALL BENCH TESTS PASSED");
 process.exit(fail);

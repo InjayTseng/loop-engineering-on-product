@@ -62,13 +62,13 @@ Cost, from the three backend rounds whose transcripts survived: $1.98, $3.51 and
 
 | Gate | Must be caught | Must pass |
 |---|---|---|
-| value-critic (14) | fabricated signals ×2, duplicates of shipped work ×2, non-goals ×2, off-funnel polish ×2 | 3 ideas on the stage positioning says to push |
-| validator (7) | a button whose label promises what its handler does not do, a claimed change that never appears, a broken funnel string, a syntax error | 3 correct implementations |
+| value-critic (22) | fabricated signals, duplicates of shipped work, non-goals, off-funnel polish (2 each); **hard:** an invented count inside a good idea, an unmeasured statistic, a shipped feature renamed (×2), a non-goal on the right stage (friends' streaks, a 3-step setup, coins), sharing without a button press | 3 ideas on the stage positioning says to push |
+| validator (13) | a label that promises what its handler does not do, a claimed change that never appears, a broken funnel string, a syntax error; **hard:** two of three promised buttons, buttons placed in a section that is hidden by then, a label one word off its handler, the upgrade CTA moved into a hidden block, buttons that never go away | 3 correct implementations; **hard:** a correct one written unusually (rendered from JS, invisible to `check.mjs`'s control list) |
 
-Two of the four validator failures pass `BUILD_CMD` — the validator has to read the evidence, not trust the exit code.
+Every hard validator case passes `BUILD_CMD`, and so do two of the four basic failures — the validator has to read the evidence, not trust the exit code.
 
 ```bash
-node scripts/eval/bench.mjs                      # all 21 cases once (~$0.40); --repeat 3 for stability
+node scripts/eval/bench.mjs                      # all 35 cases once (~$0.65); --repeat 2+ for stability
 node scripts/eval/bench.mjs --gate validator --model haiku --out .loop/bench/haiku.jsonl
 node scripts/eval/bench.mjs --compare .loop/bench/base.jsonl .loop/bench/haiku.jsonl
 ```
@@ -86,7 +86,19 @@ That is the first baseline (framework `b10cbe8`, 3 repeats, $1.14). An unparsed 
 
 **What building it taught.** The first draft had six "good" value-critic ideas; the gate rejected four of them, every time, and its reasons were right: they targeted stages other than the one positioning says to push. A second set — Enter-to-submit, autofocus, a hint in the empty state — was on the right stage, but the audited cause is *having no starting point*, and those only help someone who already knows what to type; whether that clears `impact>=4` is a judgment two reviewers would split on. Those three are kept as `expect: EITHER`: in no rate, but how many the gate lets through is reported, so a looser or stricter gate still shows. The rule this follows: a case's answer is changed only when the case was wrong by design, never to agree with the model.
 
-**What it can and cannot tell you yet.** Both gates are at the ceiling on these cases, so the bench catches a regression — a cheaper model, a trimmed prompt, a Jev threshold that lets fabrication through — but cannot show that a change is an improvement. That needs harder cases: a subtle invented number inside an otherwise good idea, a near-duplicate under a new name, a label that is almost right. Add them to `scripts/eval/bench/cases/*.jsonl`; a validator case is a list of find/replace `edits` on the fixture, each of which must match exactly once.
+**Hard cases, and the first question answered.** The 21 basic cases put both gates at the ceiling, so 14 hard ones were added. The Sonnet gates still got every one right (one reply in eight had no parseable `VERDICT:` line; the bench now keeps the whole reply when that happens) — which is only informative if the cases can separate anything. Run on Haiku, they do:
+
+```
+node scripts/eval/bench.mjs --compare sonnet.jsonl haiku.jsonl      # 35 cases × 2 each, e8e10ff
+  value-critic catch_rate: 100% → 97% · false_alarm: 0% → 17%
+  validator    catch_rate: 100% → 89% · false_alarm: 0% → 0%
+  cases whose answer changed: v-hard-nongoal-wizard REJECT→split · val-hard-cta-buried FAIL→PASS · v-good-signup-habit ACCEPT→split
+  cost: $1.27 → $2.37
+```
+
+Every miss but one is a hard case. And the cheaper model is not cheaper here: Haiku took about four times as long per case and cost 1.9× as much, because it took more turns. So "move the gates to Haiku to save money" is answered — no — before it ever ran overnight. n is small (2 repeats); read it as a strong hint, not a measurement.
+
+**What it cannot tell you yet.** The Sonnet gates are still at the ceiling, so the bench catches a regression but cannot show that a prompt change improves them. Harder cases go in `scripts/eval/bench/cases/*.jsonl`; a validator case is a list of find/replace `edits` on the fixture, each of which must match exactly once.
 
 ## Caveats
 
