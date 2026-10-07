@@ -1,0 +1,61 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Tally — one small habit a day</title>
+</head>
+<body>
+<section id="hero">
+  <h1>Tally</h1>
+  <p>One small habit a day. Check it off, keep the streak.</p>
+  <button id="start" onclick="showSignup()">Start your first habit</button>
+</section>
+
+<section id="signup" hidden>
+  <input id="email" type="email" placeholder="you@example.com">
+  <button id="create" onclick="createAccount()">Create account</button>
+</section>
+
+<section id="habits" hidden>
+  <h2>Today</h2>
+  <p id="streak">Streak: <span id="streak-days">0</span> days</p>
+  <ul id="list"></ul>
+  <p id="empty">No habits yet.</p>
+  <input id="new-habit" placeholder="e.g. Read 10 pages">
+  <button id="add" onclick="addHabit(document.getElementById('new-habit').value)">Add habit</button>
+</section>
+
+<section id="plans">
+  <h2>Plans</h2>
+  <p>Free: up to 3 habits. Pro: unlimited habits and reminders at any time, $3/month.</p>
+  <button id="upgrade" onclick="openCheckout()">Upgrade to Pro</button>
+</section>
+
+<script>
+const state = { habits: [], streak: 0, email: null };
+function showSignup() { document.getElementById("signup").hidden = false; document.getElementById("email").focus(); }
+function createAccount() {
+  state.email = document.getElementById("email").value;
+  document.getElementById("signup").hidden = true;
+  document.getElementById("habits").hidden = false;
+  track("activation_done");
+}
+function addHabit(name) {
+  if (!name) return;
+  if (state.habits.length >= 3) { openCheckout(); return; }
+  state.habits.push({ name, done: false });
+  render();
+  track("habit_added");
+}
+function checkIn(i) { state.habits[i].done = true; state.streak += 1; render(); track("core_value"); }
+function render() {
+  const list = document.getElementById("list");
+  list.innerHTML = state.habits.map((h, i) => `<li>${h.name} <button onclick="checkIn(${i})">${h.done ? "Done" : "Check in"}</button></li>`).join("");
+  document.getElementById("empty").hidden = state.habits.length > 0;
+  document.getElementById("streak-days").textContent = state.streak;
+}
+function openCheckout() { track("pay_open"); location.href = "/checkout"; }
+function track(event) { navigator.sendBeacon && navigator.sendBeacon("/t", event); }
+</script>
+</body>
+</html>

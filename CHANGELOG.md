@@ -2,7 +2,14 @@
 
 Newest first. Commit ids link a change to its tests and its reasoning. **v3.1** (git tag `v3.1`) is everything from 2026-09-27 to 2026-09-29 below; **v3** is the baseline at the bottom. Updating an adopted repo: `scripts/loop-kit.sh update <repo>` (see [docs/08-adopt.md](docs/08-adopt.md#updating-later)).
 
-## Unreleased — eval, step 1: record and label
+## Unreleased — eval, steps 1–2: record, label, and seeded gate cases
+
+### Step 2: seeded gate cases
+- **`scripts/eval/bench.mjs`**: runs the real `value-critic` and `validator` agents (`claude -p --agent`) on 21 cases whose answer is fixed in advance, each in a fresh throwaway repo of a small fixture product, and scores catch rate, false-alarm rate, per-class results and cost; `--repeat` flags unstable cases, `--compare` shows deltas and flipped cases between two runs. Gates run isolated from user settings and MCP servers.
+- First baseline (`b10cbe8`, 3 repeats, $1.14): both gates 100% catch, 0% false alarms — at the ceiling, so the bench catches regressions but needs harder cases to show improvements. Three borderline ideas are reported outside every rate. See [docs/11-eval.md](docs/11-eval.md).
+- Tests: `scripts/eval/test/bench.test.mjs` (stub model: repo setup, parsing, scoring, repeats, compare); in CI.
+
+### Step 1: record and label
 
 - **Cost per call**: every `claude -p` call's cost, duration, turns, tokens and cost per model go to `.loop/usage.jsonl`, with a one-line summary in `loop.log`; a call with no result (timeout, usage limit) is `null`, never 0.
 - **`scripts/eval/label-outcomes.mjs`**: labels every shipped commit from git — merged, merged-fixed, merged-reverted, reverted, skipped, pending — so gate quality is judged by the human's own decisions, not by another model.

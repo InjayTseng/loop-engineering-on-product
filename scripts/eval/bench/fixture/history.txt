@@ -1,0 +1,3 @@
+Tally: landing, signup, habits, plans
+loop(retention): streak counter on the Today screen — moves core_value→retention
+loop(retention): 8 pm reminder email for anyone who has not checked in — moves retention

@@ -229,7 +229,7 @@ Start with [`docs/00-pipeline.md`](docs/00-pipeline.md): it defines the graph �
 | [07 Adapters](docs/07-adapters.md) | The web and iOS adapters + four questions for a new setting |
 | [08 Install into your repo](docs/08-adopt.md) | Five steps and an acceptance checklist |
 | [09 Jev pre-checks (optional)](docs/09-jev.md) | A typed-judgment model that fast-rejects in front of the LLM gates: off → shadow → prefilter, offline eval first |
-| [11 Eval](docs/11-eval.md) | A baseline the next change is measured against: cost per call, git-labelled outcomes of every shipped change, one scorecard — and why merge rate alone cannot rank gates |
+| [11 Eval](docs/11-eval.md) | A baseline the next change is measured against: cost per call, git-labelled outcomes of every shipped change, one scorecard; a seeded bench that scores each gate's catch and false-alarm rate on cases with known answers |
 | [10 Developer dashboard](docs/10-dashboard.md) | `node scripts/dashboard/serve.mjs`: a local read-only page with the history, the current step, and the distance to each stop threshold |
 
 What changed and when, with commit ids: [`CHANGELOG.md`](CHANGELOG.md).
@@ -264,7 +264,8 @@ What changed and when, with commit ids: [`CHANGELOG.md`](CHANGELOG.md).
 │   ├── jev/                  # optional Jev pre-checks: jev.mjs (4 tasks) · ledger.mjs · eval-backlog.mjs ·
 │   │                         #   shadow-report.mjs · test/ (npm test)
 │   ├── dashboard/            # serve.mjs · state.mjs · index.html (local, read-only) · test/
-│   ├── eval/                 # label-outcomes.mjs (git → labels.jsonl) · baseline.mjs (scorecard) · test/
+│   ├── eval/                 # label-outcomes.mjs (git → labels.jsonl) · baseline.mjs (scorecard) ·
+│   │                         #   bench.mjs + bench/ (seeded gate cases on a fixture product) · test/
 │   ├── loop-kit.sh           # install into a product repo / update it later without overwriting your changes
 │   ├── test-kit.sh           # tests for loop-kit.sh
 │   ├── install-hooks.sh      # pre-push hook: refuses DEPLOY_BRANCH

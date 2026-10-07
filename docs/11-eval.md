@@ -1,11 +1,11 @@
 # 11 Eval: a baseline the next change is measured against
 
-Every change to this loop — a value-critic prompt, a cheaper model, a Jev threshold — is a bet that it makes the loop better. This page is how to know. It is the first of four steps; only the first is built.
+Every change to this loop — a value-critic prompt, a cheaper model, a Jev threshold — is a bet that it makes the loop better. This page is how to know. It is four steps; the first two are built.
 
 | Step | What it measures | Status |
 |---|---|---|
-| 1. **Record and label** | what every call cost; what happened to every shipped change, from git | built (this page) |
-| 2. **Seeded cases** | each gate's catch rate and false-alarm rate on cases whose answer is known in advance | next |
+| 1. **Record and label** | what every call cost; what happened to every shipped change, from git | built |
+| 2. **Seeded cases** | each gate's catch rate and false-alarm rate on cases whose answer is known in advance | built |
 | 3. **Replay** | a changed gate (prompt, model) re-run on recorded decisions, at the commit where they were made | after enough labels |
 | 4. **Whole-loop A/B** | two configurations from the same frozen product snapshot, ≥ 3 runs each | only for large changes |
 
@@ -56,10 +56,43 @@ What that shows is the limit of git labels, not a perfect loop: the human merges
 
 Cost, from the three backend rounds whose transcripts survived: $1.98, $3.51 and $2.86 per round, with the orchestrator's model (Opus) about 96% of one round's cost and the Sonnet gates the rest. Usage is recorded from this version on, so `usd_per_merged` becomes available after the next run.
 
+## Step 2: seeded cases
+
+`scripts/eval/bench.mjs` runs the real gate agents on cases whose answer is fixed before any model sees them, and scores them. Each case gets a fresh throwaway git repo: a small bench product (`scripts/eval/bench/fixture` — "Tally", a one-page habit app with a positioning, an audited state, a ledger and a deterministic `BUILD_CMD`), and **this repo's** `.claude/agents`. Editing a gate's prompt therefore changes what is measured; the agent file's hash is stored on every row.
+
+| Gate | Must be caught | Must pass |
+|---|---|---|
+| value-critic (14) | fabricated signals ×2, duplicates of shipped work ×2, non-goals ×2, off-funnel polish ×2 | 3 ideas on the stage positioning says to push |
+| validator (7) | a button whose label promises what its handler does not do, a claimed change that never appears, a broken funnel string, a syntax error | 3 correct implementations |
+
+Two of the four validator failures pass `BUILD_CMD` — the validator has to read the evidence, not trust the exit code.
+
+```bash
+node scripts/eval/bench.mjs                      # all 21 cases once (~$0.40); --repeat 3 for stability
+node scripts/eval/bench.mjs --gate validator --model haiku --out .loop/bench/haiku.jsonl
+node scripts/eval/bench.mjs --compare .loop/bench/base.jsonl .loop/bench/haiku.jsonl
+```
+
+```
+value-critic  catch 100% of 24 · false alarms 0% of 9 · accuracy 100% · unparsed 0 · $0.63
+              by class: good 9/9 · fabricated 6/6 · duplicate 6/6 · non-goal 6/6 · off-funnel 6/6
+              borderline (in no rate): let through 2/9
+validator     catch 100% of 12 · false alarms 0% of 9 · accuracy 100% · unparsed 0 · $0.51
+unstable cases (different answers across repeats): v-border-empty-guide [REJECT,ACCEPT,ACCEPT]
+BENCH: value_catch=1.00 value_false_alarm=0.00 validator_catch=1.00 validator_false_alarm=0.00 usd=1.14
+```
+
+That is the first baseline (framework `b10cbe8`, 3 repeats, $1.14). An unparsed answer counts as wrong. The gate runs isolated — no user settings, hooks, CLAUDE.md or MCP servers (`BENCH_ISOLATE=0` to opt out) — which also halved the cost per case: the first run, in a normal setup, spent tokens on the user's MCP tool list and its replies complained about servers needing auth.
+
+**What building it taught.** The first draft had six "good" value-critic ideas; the gate rejected four of them, every time, and its reasons were right: they targeted stages other than the one positioning says to push. A second set — Enter-to-submit, autofocus, a hint in the empty state — was on the right stage, but the audited cause is *having no starting point*, and those only help someone who already knows what to type; whether that clears `impact>=4` is a judgment two reviewers would split on. Those three are kept as `expect: EITHER`: in no rate, but how many the gate lets through is reported, so a looser or stricter gate still shows. The rule this follows: a case's answer is changed only when the case was wrong by design, never to agree with the model.
+
+**What it can and cannot tell you yet.** Both gates are at the ceiling on these cases, so the bench catches a regression — a cheaper model, a trimmed prompt, a Jev threshold that lets fabrication through — but cannot show that a change is an improvement. That needs harder cases: a subtle invented number inside an otherwise good idea, a near-duplicate under a new name, a label that is almost right. Add them to `scripts/eval/bench/cases/*.jsonl`; a validator case is a list of find/replace `edits` on the fixture, each of which must match exactly once.
+
 ## Caveats
 
 - `merged-fixed` is a heuristic: a follow-up commit may be an unrelated improvement to the same file.
 - Labels need a reviewing human. A repo whose loop branch is never merged stays `pending`.
 - Every rate prints its n; below 20, read it as a hint.
+- The bench product is small and web-only. A gate that is perfect on it can still miss on an iOS app whose evidence is screenshots.
 
 Next: back to [00-pipeline](00-pipeline.md)
