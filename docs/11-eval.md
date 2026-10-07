@@ -98,6 +98,17 @@ node scripts/eval/bench.mjs --compare sonnet.jsonl haiku.jsonl      # 35 cases �
 
 Every miss but one is a hard case. And the cheaper model is not cheaper here: Haiku took about four times as long per case and cost 1.9× as much, because it took more turns. So "move the gates to Haiku to save money" is answered — no — before it ever ran overnight. n is small (2 repeats); read it as a strong hint, not a measurement.
 
+**Second question: Jev in front of the value gate.** `--jev-prefilter <run.jsonl>` puts the real Jev (`JEV_MODE=prefilter`) in front of every value-critic row of an existing run — answer REJECT when Jev rejects, the LLM's otherwise, as in Step 2b — so the LLM gate need not run again:
+
+```
+node scripts/eval/bench.mjs --jev-prefilter sonnet.jsonl --out sonnet+jev.jsonl    # 44 rows, under a cent
+  value-critic  catch 100% of 32 · false alarms 0% of 6 · borderline let through 1/6     (same as alone)
+  jev alone: rejected 18/32 must-reject · 0/6 good · 0/6 borderline · unavailable 0/44
+  LLM calls saved: 18/44 (41% of the value gate's cost) · Jev p50 0.4 s vs ~9 s for the gate
+```
+
+Jev never rejected a good or borderline idea, and every one of its rejects the LLM also rejected. It is sharp exactly where it should be — plain fabrication, duplicates (renamed ones too), listed non-goals, at p 0.87–0.97 — and steps aside (ESCALATE / PASS) on the subtle ones: an invented count inside a good idea 0/4, a non-goal on the right stage 2/8, off-funnel polish 0/4 (not its job). So prefilter is safe to turn on, and it removes a subagent call for the obvious bad ideas; the money is small, since the orchestrator is ~96% of a round. Twelve good-or-borderline calls is not proof that it never blocks a good idea: more good cases are the way to raise that confidence.
+
 **What it cannot tell you yet.** The Sonnet gates are still at the ceiling, so the bench catches a regression but cannot show that a prompt change improves them. Harder cases go in `scripts/eval/bench/cases/*.jsonl`; a validator case is a list of find/replace `edits` on the fixture, each of which must match exactly once.
 
 ## Caveats
