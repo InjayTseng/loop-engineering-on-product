@@ -24,10 +24,10 @@ jobs:
         run: bash scripts/test-kit.sh
       - name: eval (labels, baseline)
         run: node scripts/eval/test/eval.test.mjs
-      - name: eval (seeded gate bench, stub model)
-        run: node scripts/eval/test/bench.test.mjs
       - name: dashboard
         run: node --test scripts/dashboard/test/*.test.mjs
       - name: jev
         working-directory: scripts/jev
         run: npm ci && npm test
+      - name: eval (seeded gate bench, stub model and mock Jev; after jev installs jev-use)
+        run: node scripts/eval/test/bench.test.mjs

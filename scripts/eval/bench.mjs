@@ -15,6 +15,7 @@
 //                                    [--model M] [--only id,id] [--out .loop/bench/<ts>.jsonl]
 //        node scripts/eval/bench.mjs --report <run.jsonl>
 //        node scripts/eval/bench.mjs --compare <baseline.jsonl> <candidate.jsonl>
+//        node scripts/eval/bench.mjs --jev-prefilter <run.jsonl> --out <with-jev.jsonl>   (needs a Jev key)
 // Env:   CLAUDE_BIN (claude) · BENCH_TIMEOUT (seconds per case, 600) · BENCH_ISOLATE=0 (use your own settings/MCP)
 // Cost:  every case is a real model call — 35 per repeat, about $0.02 each on the Sonnet gates. The report prints what the run cost.
 import { spawn, execFileSync } from "node:child_process";
@@ -158,6 +159,40 @@ function runCase(c, attempt) {
         agent_sha: sha(join(ROOT, ".claude/agents", `${c.gate}.md`)), model_override: MODEL, framework: FRAMEWORK, reply: text.slice(-600), ...(got ? {} : { reply_full: text }) });   // no verdict: keep all of it, to see why
     });
   });
+}
+
+// --jev-prefilter <run.jsonl>: the value gate WITH Jev in front, built from a run of the gate alone. Jev can
+// only fast-reject (Step 2b), so the pipeline answers REJECT when Jev rejects and the LLM gate's answer
+// otherwise. Jev runs for real (JEV_MODE=prefilter), once per row, against the case's own positioning and
+// ledger. A Jev-rejected row never reaches the LLM: its cost is Jev's, which is not reported — so null.
+if (argv.includes("--jev-prefilter")) {
+  const src = arg("--jev-prefilter"), byId = Object.fromEntries(cases.map((c) => [c.id, c]));
+  const base = rows(src).filter((r) => r.gate === "value-critic" && byId[r.case]);
+  console.log(`bench: Jev prefilter in front of ${base.length} value-critic rows of ${src} → ${OUT}`);
+  const out = [];
+  for (const r of base) {   // one at a time: each call is a fraction of a second to a few seconds
+    const c = byId[r.case], d = setup(c), t0 = Date.now();
+    let line;
+    try {
+      line = execFileSync("node", [join(ROOT, "scripts/jev/jev.mjs"), "prefilter", "--idea", `${c.idea} — ${c.stage}`], { cwd: d, encoding: "utf8",
+        env: { ...process.env, JEV_MODE: "prefilter", JEV_LOG: join(d, "jev.jsonl"), POSITIONING: join(d, "product/positioning.md"), LEDGER: join(d, ".claude/tasks/_idea_ledger.md") } })
+        .trim().split("\n").pop();
+    } catch (e) { line = `JEV: UNAVAILABLE — ${String(e.message).split("\n")[0]}`; }
+    rmSync(d, { recursive: true, force: true });
+    const jev = (line.match(/^JEV:\s*([A-Z_]+)/) || [])[1] || null, got = jev === "REJECT" ? "REJECT" : r.got;
+    const row = { ...r, bench: OUT.split("/").pop(), got, llm_got: r.got, jev, jev_line: line.slice(0, 300), jev_ms: Date.now() - t0,
+      correct: c.expect === "EITHER" ? null : !!got && (c.expect === "ACCEPT" ? got === "ACCEPT" : got === "REJECT"),
+      cost_usd: jev === "REJECT" ? null : r.cost_usd };
+    appendFileSync(OUT, JSON.stringify(row) + "\n"); out.push(row);
+    console.log(`  ${row.correct == null ? "--   " : row.correct ? "ok   " : "WRONG"} ${c.id.padEnd(24)} expect ${c.expect.padEnd(6)} jev ${String(jev).padEnd(11)} llm ${String(r.got).padEnd(7)} → ${got}`);
+  }
+  console.log("");
+  report(out, OUT);
+  const n = (f) => out.filter(f).length, rej = (r) => r.jev === "REJECT";
+  console.log(`  jev alone: rejected ${n((r) => rej(r) && r.expect === "REJECT")}/${n((r) => r.expect === "REJECT")} must-reject · ${n((r) => rej(r) && r.expect === "ACCEPT")}/${n((r) => r.expect === "ACCEPT")} good · ${n((r) => rej(r) && r.expect === "EITHER")}/${n((r) => r.expect === "EITHER")} borderline · unavailable ${n((r) => r.jev === "UNAVAILABLE")}/${out.length}`);
+  for (const r of out.filter((r) => rej(r) && r.llm_got !== "REJECT")) console.log(`  jev overrode the LLM: ${r.case} (${r.class}) llm ${r.llm_got} → REJECT — ${r.jev_line}`);
+  console.log(`  LLM calls saved: ${n(rej)}/${out.length}`);
+  process.exit(0);
 }
 
 const jobs = []; for (let a = 1; a <= REPEAT; a++) for (const c of cases) jobs.push([c, a]);

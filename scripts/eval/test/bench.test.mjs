@@ -78,6 +78,22 @@ const o4 = join(T, "tie.jsonl");
 run(["--out", o4, "--only", "v-fab-today", "--repeat", "2"], { "v-fab-today": ["VALUE: REJECT", "VALUE: ACCEPT"] });
 has("a 1–1 tie across repeats is shown as split", execFileSync("node", [BENCHJS, "--compare", o1, o4], { encoding: "utf8" }), /v-fab-today REJECT→split/);
 
+console.log("### --jev-prefilter: Jev in front of the value gate (mock Jev, no key)");
+const o5 = join(T, "jev.jsonl");
+const jevOut = execFileSync("node", [BENCHJS, "--jev-prefilter", o1, "--out", o5], { encoding: "utf8", env: { ...process.env, TMPDIR: T,
+  JEV_BACKEND: "mock", JEV_MOCK_SCRIPT: JSON.stringify({ fabricated: { answer: 0.02 }, duplicate: { answer: 0.97 }, non_goal: { answer: 0.02 } }) } });
+const j5 = readFileSync(o5, "utf8").trim().split("\n").map((l) => JSON.parse(l));
+eq("one row per value-critic row of the source run", j5.length, cases.filter((c) => c.gate === "value-critic").length);
+eq("a Jev REJECT becomes the pipeline's answer; the LLM's answer is kept beside it", j5.every((r) => r.jev === "REJECT" && r.got === "REJECT" && r.llm_got), true);
+eq("a Jev-rejected row's cost is unknown, not 0", j5.every((r) => r.cost_usd === null), true);
+has("Jev overriding an LLM ACCEPT is listed", jevOut, /jev overrode the LLM: v-good-starter \(good\) llm ACCEPT → REJECT/);
+has("the good ideas it blocked show as false alarms", jevOut, /false alarms 100% of 3/);
+has("Jev's own tally and the LLM calls it saved", jevOut, /jev alone: rejected 16\/16 must-reject · 3\/3 good[\s\S]*LLM calls saved: 22\/22/);
+const o6 = join(T, "jev-none.jsonl");
+const noKey = execFileSync("node", [BENCHJS, "--jev-prefilter", o1, "--out", o6], { encoding: "utf8", env: { ...process.env, TMPDIR: T,
+  TYPESAFE_API_KEY: "", OPENROUTER_API_KEY: "", AI_GATEWAY_API_KEY: "", JEV_BACKEND: "" } });
+has("no key: every call UNAVAILABLE, and the LLM's answers stand", noKey, /unavailable 22\/22[\s\S]*LLM calls saved: 0\/22/);
+
 // the bench made its throwaway repos under T (TMPDIR), so a real bench running alongside does not count
 eq("throwaway repos are removed", readdirSync(T).filter((f) => f.startsWith("loop-bench-")).length, 0);
 rmSync(T, { recursive: true, force: true });
