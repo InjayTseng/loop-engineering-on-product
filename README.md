@@ -85,13 +85,14 @@ How to read it: yellow diamonds are **gates** — each judgment goes to an indep
 ## Key design choices
 
 - **Two independent gates, placed on either side of the build.** Value is judged before any code exists; correctness and promise-keeping are judged after, against the PRD, by an agent that did not write the code.
-- **A dumb driver.** `scripts/run-loop.sh` never reasons. It parses one line per node (`VALUE:`, `VERDICT:`, `LOOP_RESULT: … rejects=N`) and applies numeric rules. That is what makes it safe to run overnight, resumable, auditable — and testable with a stub (`scripts/test-driver.sh`, 15 scenarios).
+- **A dumb driver.** `scripts/run-loop.sh` never reasons. It parses one line per node (`VALUE:`, `VERDICT:`, `LOOP_RESULT: … rejects=N`) and applies numeric rules. That is what makes it safe to run overnight, resumable, auditable — and testable with a stub (`scripts/test-driver.sh`, 21 scenarios).
 - **Stop on the rejection rate, and hand off instead of ending.** When the value gate rejects more than ~1.5 ideas per idea shipped over a rolling window, the direction is exhausted; control goes to positioning, not to "done".
 - **Discover before building.** Every round starts from `product/state.md` and the running product, not from the previous round's notes.
 - **Positioning has hard and soft fields.** Target user, problem, and trust rules change only with a human. Funnel emphasis and the next stage to push can be changed overnight, and only when two senior agents independently agree.
 - **Trust rules are a hard gate.** On a trust product, an idea that relies on fabricated signals (fake counts, fake popularity, invented testimonials) is rejected no matter how well it would convert.
 - **Branch isolation is non-negotiable.** The driver refuses to run anywhere but the loop branch, re-checks every round, and a `pre-push` hook refuses the live branch at the git level (the driver refuses to start without it). The hook is a local backstop — protect the live branch on the remote as well.
 - **Every gate decision is recorded.** With `jq` installed, each gate's full report, verdict, and the evidence it gathered are appended to `.loop/gates.jsonl` — a cross-run dataset for calibrating the gates.
+- **Changes to the loop are measured, not assumed.** Every call's cost is recorded, every shipped change is labelled from git (never by a model), and a seeded bench scores each gate on cases whose answer is fixed in advance — so a cheaper model or a new prompt is compared before it runs overnight.
 - **Optional: cheap fast-rejects that can never approve.** With `JEV_MODE=prefilter`, [TypeSafe's Jev](https://docs.typesafe.ai) — a model that returns typed yes/no and pick answers instead of text, in about 0.2 s — can fast-reject obvious bad ideas (fabricated signals, duplicates, non-goals) and flag broken label promises before an LLM gate spends a subagent on them. It can never approve anything: every pass still goes through the LLM gate. Rollout is off → shadow → prefilter, gated by an offline eval.
 - **Optional: watch it live.** `node scripts/dashboard/serve.mjs` serves a local, read-only page: run history, which node the current round is at, and how far each stop condition is from firing.
 
@@ -184,6 +185,29 @@ Past runs can be replayed from their `loop.log`. See [`docs/10-dashboard.md`](do
 | v3, live (logs not included) | an iOS app and its backend — the first external adopter | five runs over three nights | last night 14 of 14 rounds shipped (backend 8/8, iOS 6/6), each with a validator PASS, no NOOPs; an interrupted round resumed and shipped the next night | seven harness bugs found by live runs, each fixed the same day with a test (lessons 11–17) |
 
 [`docs/06-lessons.md`](docs/06-lessons.md) has the seventeen lessons behind the design, with numbers — including a bash 3.2 bug that meant the v2.1 plateau could never fire (found only by testing the driver with a stub), and the seven the first live adoption taught: a session limit read as a broken adapter, validated ships vetoed by a check that could not see background agents, a redirect that lost its direction.
+
+## Measured: the eval
+
+A loop maximizes whatever it is measured on, so every change to it — a gate prompt, a cheaper model, Jev in front of a gate — is a bet. [`docs/11-eval.md`](docs/11-eval.md) is how the bet gets checked:
+
+1. **Record and label.** Cost per `claude -p` call (`.loop/usage.jsonl`); every shipped commit labelled from git — merged, reverted, fixed soon after, skipped, pending. On the first adopter: 39 of 39 decided changes merged, none reverted — which shows that whole-branch merges cannot rank gates.
+2. **Seeded cases.** `scripts/eval/bench.mjs` runs the real `value-critic` and `validator` on 35 cases whose answer is fixed in advance — fabricated signals, renamed duplicates, non-goals on the right stage, labels one word off their handler, CTAs moved into hidden blocks — each in a throwaway repo of a small fixture product.
+
+What it has answered so far (35 cases × 2 repeats):
+
+| Question | Result | Decision |
+|---|---|---|
+| Move the gates from Sonnet to Haiku to save money? | value-critic false alarms 0% → 17%, validator catch 100% → 89%; cost **$1.27 → $2.37**, ~4× slower | No — it costs more and catches less |
+| Put Jev in front of the value gate? | 18 of 32 bad ideas fast-rejected, **0 of 12** good or borderline ones; no LLM decision overridden; 41% of value-gate calls saved, 0.4 s each | Safe to turn on; subtle cases stay with the LLM |
+
+The Sonnet gates score 100% on every case so far, so the bench catches a regression but cannot yet show that a prompt change is an improvement — that needs harder cases.
+
+```bash
+node scripts/eval/bench.mjs --repeat 2 --out .loop/bench/base.jsonl          # ~$1.30
+node scripts/eval/bench.mjs --model haiku --repeat 2 --out .loop/bench/haiku.jsonl
+node scripts/eval/bench.mjs --compare .loop/bench/base.jsonl .loop/bench/haiku.jsonl
+node scripts/eval/bench.mjs --jev-prefilter .loop/bench/base.jsonl --out .loop/bench/base+jev.jsonl
+```
 
 ## Quick start
 
@@ -283,7 +307,7 @@ Do not copy the driver from `examples/*/as-run/`: those are the versions as they
 - **Proven by real runs:** the value gate, the independent validator, branch isolation, the result-line protocol, the web and iOS adapters (N=2); and, on the first live adoption (N=1), resuming an interrupted round from Step 0, gate records, and the driver's cross-check of them.
 - **Designed but not yet proven by a real run:** the positioning node P and its autonomous mode (no live run has reached a plateau or a trajectory STOP), the cost-benefit of a deep audit every 5 rounds, and whether a PRD every round reduces label-promise escapes. [`docs/06-lessons.md`](docs/06-lessons.md) lists what each still needs to show.
 - **The plateau rule is tested, not observed.** The stub tests prove it stops when it should; no real run has triggered it yet.
-- **Jev pre-checks are not yet shown to be worth it.** They have run live in prefilter mode (median 285–337 ms per call; label-promise about 1 s) and have not yet blocked a bad idea; on iOS, `claim-evidence` flagged validator PASSes whose evidence did not actually show the claim, which led to better evidence rather than a quieter check. No shadow night has been run, so there is no false-reject rate yet — see [09-jev](docs/09-jev.md).
+- **Jev pre-checks: safe on seeded cases, small in money.** On the bench the prefilter rejected no good idea (0 of 12) and saved 41% of value-gate calls — but twelve good cases are a strong hint, not proof, and the orchestrator is ~96% of a round's cost, so the saving is a subagent call, not dollars. Live, they have run in prefilter mode (median 285–337 ms per call; label-promise about 1 s); on iOS, `claim-evidence` flagged validator PASSes whose evidence did not actually show the claim, which led to better evidence rather than a quieter check. No shadow night has been run, so there is no live false-reject rate yet — see [09-jev](docs/09-jev.md) and [11-eval](docs/11-eval.md).
 - **Cost:** an overnight run with subagents can cost $50–200. See the cost routing in [05-loop](docs/05-loop.md#model-and-cost-routing).
 
 ## GitHub Actions (optional)
