@@ -4,6 +4,10 @@ Newest first. Commit ids link a change to its tests and its reasoning. **v3.1** 
 
 ## Unreleased — eval, steps 1–2: record, label, and seeded gate cases
 
+### Ideas from Spotify Confidence, measured before adopted
+- **95% Wilson intervals** on every rate in `bench.mjs` and `baseline.mjs`; `--compare` says when a delta sits inside overlapping intervals. Re-reading the earlier results: the Haiku quality deltas all overlap (the no rests on cost), and Jev's 0 of 12 good ideas blocked allows up to 24%.
+- **4 guardrail validator cases** (39 in all): the CLAIM holds and `BUILD_CMD` passes, but the next flow breaks. The Sonnet validator failed all 9 runs, naming the regression, and passed the correct version 3 of 3 — so `GUARDRAIL:` lines in the PRD template are not added; the cases stay as regression tests. See [docs/11-eval.md](docs/11-eval.md).
+
 ### Step 2: seeded gate cases
 - **`scripts/eval/bench.mjs`**: runs the real `value-critic` and `validator` agents (`claude -p --agent`) on 35 cases whose answer is fixed in advance, each in a fresh throwaway repo of a small fixture product, and scores catch rate, false-alarm rate, per-class results and cost; `--repeat` flags unstable cases, `--compare` shows deltas and flipped cases between two runs. Gates run isolated from user settings and MCP servers.
 - First baseline (`b10cbe8`, 3 repeats, $1.14): both gates 100% catch, 0% false alarms — at the ceiling, so the bench catches regressions but needs harder cases to show improvements. Three borderline ideas are reported outside every rate. See [docs/11-eval.md](docs/11-eval.md).

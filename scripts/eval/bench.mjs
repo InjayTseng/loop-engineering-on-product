@@ -17,7 +17,7 @@
 //        node scripts/eval/bench.mjs --compare <baseline.jsonl> <candidate.jsonl>
 //        node scripts/eval/bench.mjs --jev-prefilter <run.jsonl> --out <with-jev.jsonl>   (needs a Jev key)
 // Env:   CLAUDE_BIN (claude) · BENCH_TIMEOUT (seconds per case, 600) · BENCH_ISOLATE=0 (use your own settings/MCP)
-// Cost:  every case is a real model call — 35 per repeat, about $0.02 each on the Sonnet gates. The report prints what the run cost.
+// Cost:  every case is a real model call — 39 per repeat, about $0.02 each on the Sonnet gates. The report prints what the run cost.
 import { spawn, execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync, appendFileSync } from "node:fs";
@@ -56,20 +56,30 @@ function score(results) {
     const classes = {};
     for (const r of rs) { const c = (classes[r.class] ||= { n: 0, right: 0 }); c.n++; if (r.correct) c.right++; }
     const known = all.filter((r) => typeof r.cost_usd === "number");
-    out[gate] = { n: all.length, unparsed: all.filter((r) => !r.got).length, accuracy: rs.length ? rs.filter((r) => r.correct).length / rs.length : null,
+    const right = rs.filter((r) => r.correct).length, caught = bad.filter(flagged).length, alarms = good.filter(flagged).length;
+    out[gate] = { n: all.length, unparsed: all.filter((r) => !r.got).length, accuracy: rs.length ? right / rs.length : null, accuracy_ci: wilson(right, rs.length),
       borderline_n: border.length, borderline_passed: border.filter((r) => r.got && !flagged(r)).length,
-      catch_rate: bad.length ? bad.filter(flagged).length / bad.length : null, catch_n: bad.length,
-      false_alarm: good.length ? good.filter(flagged).length / good.length : null, false_alarm_n: good.length,
+      catch_rate: bad.length ? caught / bad.length : null, catch_n: bad.length, catch_rate_ci: wilson(caught, bad.length),
+      false_alarm: good.length ? alarms / good.length : null, false_alarm_n: good.length, false_alarm_ci: wilson(alarms, good.length),
       cost_usd: known.reduce((a, r) => a + r.cost_usd, 0), cost_unknown: all.length - known.length, classes };
   }
   return out;
 }
+// 95% Wilson interval for k of n. With a dozen cases a rate is a range, not a point: 0 false alarms of 12
+// is consistent with a true rate up to 24%. Wilson stays inside [0, 1] and is sane at 0 and n, unlike p ± 2·SE.
+// Repeats of one case are counted as separate runs, though they are not independent: the real interval is wider.
+function wilson(k, n, z = 1.96) {
+  if (!n) return null;
+  const p = k / n, d = 1 + (z * z) / n, c = (p + (z * z) / (2 * n)) / d, h = (z * Math.sqrt((p * (1 - p)) / n + (z * z) / (4 * n * n))) / d;
+  return [Math.max(0, c - h), Math.min(1, c + h)];
+}
 const pct = (x) => (x == null ? "n/a" : `${Math.round(x * 100)}%`);
+const ci = (r) => (r ? `${Math.round(r[0] * 100)}–${Math.round(r[1] * 100)}%` : "n/a");
 function report(results, label) {
   const s = score(results); const meta = results[0] || {};
   console.log(`${label} — framework ${meta.framework || "?"}${meta.model_override ? ` · model override ${meta.model_override}` : ""} · ${results.length} case runs`);
   for (const [gate, g] of Object.entries(s)) {
-    console.log(`  ${gate.padEnd(13)} catch ${pct(g.catch_rate)} of ${g.catch_n} · false alarms ${pct(g.false_alarm)} of ${g.false_alarm_n} · accuracy ${pct(g.accuracy)} · unparsed ${g.unparsed} · $${g.cost_usd.toFixed(2)}${g.cost_unknown ? ` (+${g.cost_unknown} unknown)` : ""}`);
+    console.log(`  ${gate.padEnd(13)} catch ${pct(g.catch_rate)} of ${g.catch_n} (95% CI ${ci(g.catch_rate_ci)}) · false alarms ${pct(g.false_alarm)} of ${g.false_alarm_n} (95% CI ${ci(g.false_alarm_ci)}) · accuracy ${pct(g.accuracy)} · unparsed ${g.unparsed} · $${g.cost_usd.toFixed(2)}${g.cost_unknown ? ` (+${g.cost_unknown} unknown)` : ""}`);
     console.log(`  ${"".padEnd(13)} by class: ${Object.entries(g.classes).map(([c, v]) => `${c} ${v.right}/${v.n}`).join(" · ")}`);
     if (g.borderline_n) console.log(`  ${"".padEnd(13)} borderline (in no rate): let through ${g.borderline_passed}/${g.borderline_n}`);
   }
@@ -91,7 +101,10 @@ if (argv.includes("--compare")) {
   console.log("");
   for (const gate of Object.keys({ ...a, ...b })) for (const k of ["catch_rate", "false_alarm", "accuracy"]) {
     const x = a[gate]?.[k], y = b[gate]?.[k]; if (x == null || y == null) continue;
-    console.log(`  ${gate} ${k}: ${pct(x)} → ${pct(y)} (${y >= x ? "+" : ""}${Math.round((y - x) * 100)} pts)`);
+    // overlapping intervals do not prove "no difference", but a delta inside them is not one to act on alone
+    const p = a[gate][`${k}_ci`], q = b[gate][`${k}_ci`];
+    const overlap = p && q && p[0] <= q[1] && q[0] <= p[1];
+    console.log(`  ${gate} ${k}: ${pct(x)} → ${pct(y)} (${y >= x ? "+" : ""}${Math.round((y - x) * 100)} pts) · 95% CI ${ci(p)} → ${ci(q)}${x === y ? "" : overlap ? " — intervals overlap: a hint, not a measured difference" : " — intervals apart"}`);
   }
   for (const gate of Object.keys({ ...a, ...b })) if (a[gate]?.borderline_n && b[gate]?.borderline_n)
     console.log(`  ${gate} borderline let through: ${a[gate].borderline_passed}/${a[gate].borderline_n} → ${b[gate].borderline_passed}/${b[gate].borderline_n}`);

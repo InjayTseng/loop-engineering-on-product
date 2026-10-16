@@ -63,12 +63,12 @@ Cost, from the three backend rounds whose transcripts survived: $1.98, $3.51 and
 | Gate | Must be caught | Must pass |
 |---|---|---|
 | value-critic (22) | fabricated signals, duplicates of shipped work, non-goals, off-funnel polish (2 each); **hard:** an invented count inside a good idea, an unmeasured statistic, a shipped feature renamed (×2), a non-goal on the right stage (friends' streaks, a 3-step setup, coins), sharing without a button press | 3 ideas on the stage positioning says to push |
-| validator (13) | a label that promises what its handler does not do, a claimed change that never appears, a broken funnel string, a syntax error; **hard:** two of three promised buttons, buttons placed in a section that is hidden by then, a label one word off its handler, the upgrade CTA moved into a hidden block, buttons that never go away | 3 correct implementations; **hard:** a correct one written unusually (rendered from JS, invisible to `check.mjs`'s control list) |
+| validator (17) | a label that promises what its handler does not do, a claimed change that never appears, a broken funnel string, a syntax error; **hard:** two of three promised buttons, buttons placed in a section that is hidden by then, a label one word off its handler, the upgrade CTA moved into a hidden block, buttons that never go away; **guardrail:** the CLAIM holds but the flow next to it breaks — check-in off by one, the activation event dropped, an Enter shortcut that skips the 3-habit paywall | 4 correct implementations (one is the Enter shortcut done right); **hard:** a correct one written unusually (rendered from JS, invisible to `check.mjs`'s control list) |
 
 Every hard validator case passes `BUILD_CMD`, and so do two of the four basic failures — the validator has to read the evidence, not trust the exit code.
 
 ```bash
-node scripts/eval/bench.mjs                      # all 35 cases once (~$0.65); --repeat 2+ for stability
+node scripts/eval/bench.mjs                      # all 39 cases once (~$0.75); --repeat 2+ for stability
 node scripts/eval/bench.mjs --gate validator --model haiku --out .loop/bench/haiku.jsonl
 node scripts/eval/bench.mjs --compare .loop/bench/base.jsonl .loop/bench/haiku.jsonl
 ```
@@ -96,7 +96,7 @@ node scripts/eval/bench.mjs --compare sonnet.jsonl haiku.jsonl      # 35 cases �
   cost: $1.27 → $2.37
 ```
 
-Every miss but one is a hard case. And the cheaper model is not cheaper here: Haiku took about four times as long per case and cost 1.9× as much, because it took more turns. So "move the gates to Haiku to save money" is answered — no — before it ever ran overnight. n is small (2 repeats); read it as a strong hint, not a measurement.
+Every miss but one is a hard case. And the cheaper model is not cheaper here: Haiku took about four times as long per case and cost 1.9× as much, because it took more turns. So "move the gates to Haiku to save money" is answered — no — before it ever ran overnight. The answer rests on cost, not on the quality deltas: with 95% intervals (below), every one of them overlaps — value-critic false alarms 0–39% → 3–56%, validator catch 82–100% → 67–97%. Cost is measured on every call, and it alone says no.
 
 **Second question: Jev in front of the value gate.** `--jev-prefilter <run.jsonl>` puts the real Jev (`JEV_MODE=prefilter`) in front of every value-critic row of an existing run — answer REJECT when Jev rejects, the LLM's otherwise, as in Step 2b — so the LLM gate need not run again:
 
@@ -107,7 +107,17 @@ node scripts/eval/bench.mjs --jev-prefilter sonnet.jsonl --out sonnet+jev.jsonl 
   LLM calls saved: 18/44 (41% of the value gate's cost) · Jev p50 0.4 s vs ~9 s for the gate
 ```
 
-Jev never rejected a good or borderline idea, and every one of its rejects the LLM also rejected. It is sharp exactly where it should be — plain fabrication, duplicates (renamed ones too), listed non-goals, at p 0.87–0.97 — and steps aside (ESCALATE / PASS) on the subtle ones: an invented count inside a good idea 0/4, a non-goal on the right stage 2/8, off-funnel polish 0/4 (not its job). So prefilter is safe to turn on, and it removes a subagent call for the obvious bad ideas; the money is small, since the orchestrator is ~96% of a round. Twelve good-or-borderline calls is not proof that it never blocks a good idea: more good cases are the way to raise that confidence.
+Jev never rejected a good or borderline idea, and every one of its rejects the LLM also rejected. It is sharp exactly where it should be — plain fabrication, duplicates (renamed ones too), listed non-goals, at p 0.87–0.97 — and steps aside (ESCALATE / PASS) on the subtle ones: an invented count inside a good idea 0/4, a non-goal on the right stage 2/8, off-funnel polish 0/4 (not its job). So prefilter is safe to turn on, and it removes a subagent call for the obvious bad ideas; the money is small, since the orchestrator is ~96% of a round. Twelve good-or-borderline calls is not proof that it never blocks a good idea: 0 of 12 is consistent with a true false-reject rate up to 24% (95% upper bound). More good cases are the way to raise that confidence.
+
+**Third question: does the PRD need `GUARDRAIL:` lines?** Spotify's Confidence ships a change only when its success metric improves *and* no guardrail metric gets worse. The loop's PRD has one CLAIM and no guardrails; the validator's "no regression" axis is generic. Before adding guardrail lines to the template, three `guardrail` cases test whether the gap is real: each keeps its CLAIM, passes `BUILD_CMD`, and breaks the flow next to it.
+
+```
+node scripts/eval/bench.mjs --gate validator --only val-guard-… --repeat 3      # f181939, $0.30
+  validator  catch 100% of 9 (95% CI 70–100%) · false alarms 0% of 3 (95% CI 0–56%)
+             by class: guardrail 9/9 · good 3/3
+```
+
+Every FAIL named the regression itself (the off-by-one handler, the deleted `track("activation_done")`, the skipped free-limit check), not some side issue. So the template does not change: the gap is not there on this bench. The cases stay, so a cheaper model or a shorter validator prompt that loses this will show it. The bench product is web and its evidence is code; on an app whose evidence is screenshots, the generic axis has less to read, and the question is worth asking again there.
 
 **What it cannot tell you yet.** The Sonnet gates are still at the ceiling, so the bench catches a regression but cannot show that a prompt change improves them. Harder cases go in `scripts/eval/bench/cases/*.jsonl`; a validator case is a list of find/replace `edits` on the fixture, each of which must match exactly once.
 
@@ -115,7 +125,7 @@ Jev never rejected a good or borderline idea, and every one of its rejects the L
 
 - `merged-fixed` is a heuristic: a follow-up commit may be an unrelated improvement to the same file.
 - Labels need a reviewing human. A repo whose loop branch is never merged stays `pending`.
-- Every rate prints its n; below 20, read it as a hint.
+- Every rate prints its n and a 95% Wilson interval, in `bench.mjs` and `baseline.mjs`. Repeats of one case count as separate runs though they are not independent, so the true interval is wider still. `--compare` says when a delta sits inside overlapping intervals: a hint, not a measured difference.
 - The bench product is small and web-only. A gate that is perfect on it can still miss on an iOS app whose evidence is screenshots.
 
 Next: back to [00-pipeline](00-pipeline.md)

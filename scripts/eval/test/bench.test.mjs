@@ -58,8 +58,9 @@ const mixed = { ...allRight, "v-fab-today": "VALUE: ACCEPT", "v-good-prefill": "
   "val-good-usage": "VERDICT: PARTIAL", "val-bad-never-shown": "VERDICT: PARTIAL", "v-dup-streak": "I think this is fine." };
 const out2 = run(["--out", o2], mixed);
 // value-critic: 16 must-reject → 14 caught (fab-today accepted, dup-streak unparsed); 3 good → 1 false alarm
-// validator: 9 must-fail → 8 caught (share-label passed; never-shown PARTIAL counts as caught); 4 good → 1 false alarm (PARTIAL)
-has("scores", out2, /BENCH: value_catch=0\.88 value_false_alarm=0\.33 validator_catch=0\.89 validator_false_alarm=0\.25/);
+// validator: 12 must-fail → 11 caught (share-label passed; never-shown PARTIAL counts as caught); 5 good → 1 false alarm (PARTIAL)
+has("scores", out2, /BENCH: value_catch=0\.88 value_false_alarm=0\.33 validator_catch=0\.92 validator_false_alarm=0\.20/);
+has("every rate carries its 95% Wilson interval", out2, /catch 92% of 12 \(95% CI 65–99%\) · false alarms 20% of 5 \(95% CI 4–62%\)/);
 has("backticked verdicts are parsed", out2, /WRONG v-good-prefill \(good\): expected ACCEPT, got REJECT/);
 has("an unparsed answer is wrong, not skipped", out2, /WRONG v-dup-streak \(duplicate\): expected REJECT, got no verdict/);
 has("per-class breakdown", out2, /fabricated 1\/2/);
@@ -73,6 +74,7 @@ has("an unstable case is reported with its answers", out3, /unstable cases.*v-fa
 console.log("### --compare");
 const cmp = execFileSync("node", [BENCHJS, "--compare", o1, o2], { encoding: "utf8" });
 has("metric deltas", cmp, /value-critic catch_rate: 100% → 88% \(-12 pts\)/);
+has("a delta inside overlapping intervals is called a hint", cmp, /validator catch_rate: 100% → 92% \(-8 pts\) · 95% CI 76–100% → 65–99% — intervals overlap: a hint/);
 has("the cases whose answer changed", cmp, /v-fab-today REJECT→ACCEPT/);
 const o4 = join(T, "tie.jsonl");
 run(["--out", o4, "--only", "v-fab-today", "--repeat", "2"], { "v-fab-today": ["VALUE: REJECT", "VALUE: ACCEPT"] });

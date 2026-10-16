@@ -191,14 +191,15 @@ Past runs can be replayed from their `loop.log`. See [`docs/10-dashboard.md`](do
 A loop maximizes whatever it is measured on, so every change to it — a gate prompt, a cheaper model, Jev in front of a gate — is a bet. [`docs/11-eval.md`](docs/11-eval.md) is how the bet gets checked:
 
 1. **Record and label.** Cost per `claude -p` call (`.loop/usage.jsonl`); every shipped commit labelled from git — merged, reverted, fixed soon after, skipped, pending. On the first adopter: 39 of 39 decided changes merged, none reverted — which shows that whole-branch merges cannot rank gates.
-2. **Seeded cases.** `scripts/eval/bench.mjs` runs the real `value-critic` and `validator` on 35 cases whose answer is fixed in advance — fabricated signals, renamed duplicates, non-goals on the right stage, labels one word off their handler, CTAs moved into hidden blocks — each in a throwaway repo of a small fixture product.
+2. **Seeded cases.** `scripts/eval/bench.mjs` runs the real `value-critic` and `validator` on 39 cases whose answer is fixed in advance — fabricated signals, renamed duplicates, non-goals on the right stage, labels one word off their handler, CTAs moved into hidden blocks, changes that keep their CLAIM but break the flow next to it — each in a throwaway repo of a small fixture product.
 
-What it has answered so far (35 cases × 2 repeats):
+What it has answered so far (every rate is printed with its 95% interval):
 
 | Question | Result | Decision |
 |---|---|---|
-| Move the gates from Sonnet to Haiku to save money? | value-critic false alarms 0% → 17%, validator catch 100% → 89%; cost **$1.27 → $2.37**, ~4× slower | No — it costs more and catches less |
-| Put Jev in front of the value gate? | 18 of 32 bad ideas fast-rejected, **0 of 12** good or borderline ones; no LLM decision overridden; 41% of value-gate calls saved, 0.4 s each | Safe to turn on; subtle cases stay with the LLM |
+| Move the gates from Sonnet to Haiku to save money? | value-critic false alarms 0% → 17%, validator catch 100% → 89%; cost **$1.27 → $2.37**, ~4× slower | No — on cost; the quality deltas sit inside overlapping intervals |
+| Put Jev in front of the value gate? | 18 of 32 bad ideas fast-rejected, **0 of 12** good or borderline ones; no LLM decision overridden; 41% of value-gate calls saved, 0.4 s each | Safe to turn on; subtle cases stay with the LLM. 0 of 12 still allows up to 24% |
+| Add `GUARDRAIL:` lines to the PRD, so the validator knows what must not break? | 3 changes that keep their CLAIM and pass `BUILD_CMD` but break the next flow (check-in off by one, activation event dropped, Enter bypassing the paywall): validator FAIL **9 of 9**, each naming the regression; the correct version PASS 3 of 3 | Not yet — the generic "no regression" axis already catches them; the cases stay as regression tests |
 
 The Sonnet gates score 100% on every case so far, so the bench catches a regression but cannot yet show that a prompt change is an improvement — that needs harder cases.
 

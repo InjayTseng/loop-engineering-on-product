@@ -75,6 +75,7 @@ eq("cost: unknown-cost calls are counted, never added as 0", [b.cost.total_usd, 
 eq("cost per merged = 6 / 4", b.cost.usd_per_merged, 1.5);
 eq("cost by model", b.cost.by_model, { "claude-opus-5-5": 1.5, "claude-sonnet-5-5": 0.5 });
 const text = execFileSync("node", [BASE, "--repo", R], { encoding: "utf8" });
+eq("rates carry a 95% Wilson interval", /merged 80% \(95% CI 38–96%\) of decided · escapes \(fixed soon \/ reverted\) 40% \(95% CI 12–77%\)/.test(text), true);
 eq("last line", text.trim().split("\n").pop(), "BASELINE: shipped=6 decided=5 merge_rate=0.80 escape_rate=0.40 usd_per_merged=1.50");
 
 console.log("### no gate records: falls back to loop(...) commits on the loop branch");

@@ -26,6 +26,10 @@ const rate = (a, b) => (b ? a / b : null);
 const pct = (x) => (x == null ? "n/a" : `${Math.round(x * 100)}%`);
 const usd = (x) => (x == null ? "n/a" : `$${x.toFixed(2)}`);
 const small = (n) => (n < 20 ? "  (small sample)" : "");
+// 95% Wilson interval, as in bench.mjs: "0 escapes of 39" still allows a true escape rate up to 9%
+const ci = (k, n, z = 1.96) => { if (!n) return "";
+  const p = k / n, d = 1 + (z * z) / n, c = (p + (z * z) / (2 * n)) / d, h = (z * Math.sqrt((p * (1 - p)) / n + (z * z) / (4 * n * n))) / d;
+  return ` (95% CI ${Math.round(Math.max(0, c - h) * 100)}–${Math.round(Math.min(1, c + h) * 100)}%)`; };
 
 // --- outcomes of shipped commits --------------------------------------------------------------------------
 const by = (l) => labels.filter((r) => r.label === l).length;
@@ -74,10 +78,10 @@ if (process.argv.includes("--json")) { console.log(JSON.stringify(out, null, 2))
 console.log(`baseline for ${REPO}`);
 console.log("");
 console.log(`outcomes   shipped ${out.shipped}, decided ${out.decided}, pending review ${out.pending}${small(out.decided)}`);
-console.log(`           merged ${pct(out.merge_rate)} of decided · escapes (fixed soon / reverted) ${pct(out.escape_rate)} of decided`);
+console.log(`           merged ${pct(out.merge_rate)}${ci(mergedN, decided.length)} of decided · escapes (fixed soon / reverted) ${pct(out.escape_rate)}${ci(escapeN, decided.length)} of decided`);
 console.log(`           ${Object.entries(out.labels).filter(([, n]) => n).map(([l, n]) => `${l} ${n}`).join(" · ") || "no labels yet — run scripts/eval/label-outcomes.mjs"}`);
 console.log(`value gate ${out.value_gate.decisions} decisions: ${accepts} ACCEPT, ${rejects} REJECT · ${out.value_gate.rejects_per_ship == null ? "n/a" : out.value_gate.rejects_per_ship.toFixed(2)} rejects per shipped round`);
-console.log(`validator  ${passedDecided.length} decided ships with a final PASS · escape rate after PASS ${pct(out.validator.escape_rate_after_pass)}${small(passedDecided.length)}`);
+console.log(`validator  ${passedDecided.length} decided ships with a final PASS · escape rate after PASS ${pct(out.validator.escape_rate_after_pass)}${ci(passEscapes, passedDecided.length)}${small(passedDecided.length)}`);
 if (known.length) {
   console.log(`cost       ${usd(total)} over ${known.length} calls (${out.cost.calls_cost_unknown} with unknown cost) · ${usd(out.cost.usd_per_round)} per round · ${usd(out.cost.usd_per_shipped)} per shipped · ${usd(out.cost.usd_per_merged)} per merged`);
   console.log(`           by kind: ${Object.entries(byKind).map(([k, v]) => `${k} ${usd(v)}`).join(" · ")}`);
